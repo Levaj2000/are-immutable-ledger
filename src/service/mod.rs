@@ -199,7 +199,7 @@ pub struct ImmutableLedgerService<R: LedgerRepository, P: EventPublisher> {
     repo: Arc<R>,
     publisher: Arc<P>,
     config: Arc<AppConfig>,
-    chain_halted: Arc<RwLock<std::collections::HashSet<String>>>,
+    chain_halted: Arc<RwLock<std::collections::HashMap<String, std::time::Instant>>>,
 }
 
 impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedgerService<R, P> {
@@ -208,7 +208,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             repo,
             publisher,
             config,
-            chain_halted: Arc::new(RwLock::new(std::collections::HashSet::new())),
+            chain_halted: Arc::new(RwLock::new(std::collections::HashMap::new())),
         };
         if service.publisher.is_enabled() {
             service.start_outbox_processor();
@@ -245,7 +245,9 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         &self,
         input: WriteEntryInput,
     ) -> Result<WriteEntryOutput, ServiceError> {
+        let start = std::time::Instant::now();
         let out = self.write_entry_impl(input).await;
+        crate::metrics::WRITE_DURATION.observe(start.elapsed().as_secs_f64());
         let label: &'static str = match &out {
             Ok(_) => "ok",
             Err(ServiceError::InvalidArgument(_)) => "invalid",
@@ -274,8 +276,16 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                 self.config.max_content_size_bytes
             )));
         }
-        if self.chain_halted.read().await.contains(&input.entry_type) {
-            return Err(ServiceError::Unavailable);
+        {
+            let recovery = Duration::from_secs(self.config.chain_halt_recovery_seconds);
+            let halted = self.chain_halted.read().await;
+            if let Some(halted_at) = halted.get(&input.entry_type) {
+                if halted_at.elapsed() < recovery {
+                    return Err(ServiceError::Unavailable);
+                }
+                drop(halted);
+                self.chain_halted.write().await.remove(&input.entry_type);
+            }
         }
         if let Some(key) = &input.idempotency_key {
             if let Some(existing) = self
@@ -299,7 +309,8 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             }
         }
 
-        for attempt in 0..5 {
+        let max_retries = self.config.chain_max_retries;
+        for attempt in 0..max_retries {
             let previous_hash = match self.repo.get_chain_tip(&input.entry_type).await {
                 Ok(tip) => tip.hash,
                 Err(RepositoryError::NotFound) => {
@@ -329,6 +340,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                 .await
             {
                 Ok(result) => {
+                    crate::metrics::CHAIN_INTEGRITY_RETRIES.observe(attempt as f64);
                     return Ok(WriteEntryOutput {
                         entry_id: result.entry.entry_id,
                         entry_hash: result.entry.entry_hash,
@@ -336,7 +348,9 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                         written_ts_ms: result.entry.written_ts.timestamp_millis(),
                     });
                 }
-                Err(RepositoryError::ChainIntegrityViolation) if attempt < 4 => {
+                Err(RepositoryError::ChainIntegrityViolation) if attempt + 1 < max_retries => {
+                    let backoff = Duration::from_millis(10 * 2u64.pow(attempt));
+                    tokio::time::sleep(backoff).await;
                     continue;
                 }
                 Err(RepositoryError::IdempotencyConflict) => {
@@ -362,11 +376,16 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                     ));
                 }
                 Err(RepositoryError::ChainIntegrityViolation) => {
-                    // Repeated mismatches indicate potential corruption, halt writes for this type.
                     self.chain_halted
                         .write()
                         .await
-                        .insert(input.entry_type.clone());
+                        .insert(input.entry_type.clone(), std::time::Instant::now());
+                    tracing::error!(
+                        entry_type = %input.entry_type,
+                        retries = max_retries,
+                        recovery_seconds = self.config.chain_halt_recovery_seconds,
+                        "chain halted after max retries, will auto-recover"
+                    );
                     return Err(ServiceError::Internal(
                         "chain integrity violation".to_string(),
                     ));
@@ -616,6 +635,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         entry_type: &str,
         entry_hash: &str,
     ) -> Result<VerifyProofOutput, ServiceError> {
+        let start = std::time::Instant::now();
         let entry = self
             .repo
             .get_entry_by_hash(entry_type, entry_hash)
@@ -638,6 +658,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         });
 
         let hash_valid = computed == entry.entry_hash;
+        crate::metrics::VERIFY_DURATION.observe(start.elapsed().as_secs_f64());
         Ok(VerifyProofOutput {
             valid: hash_valid,
             entry_type: entry.entry_type,
@@ -722,6 +743,9 @@ mod tests {
             outbox_http_bearer_token: None,
             outbox_http_timeout_seconds: 10,
             genesis_hash_input: "ARE_LEDGER_GENESIS".to_string(),
+            pool_max_size: 16,
+            chain_max_retries: 10,
+            chain_halt_recovery_seconds: 60,
             api_token: None,
             shutdown_token: None,
         })

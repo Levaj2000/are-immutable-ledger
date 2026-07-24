@@ -22,7 +22,6 @@ use are_immutable_ledger::grpc::ImmutableLedgerGrpc;
 use are_immutable_ledger::metrics;
 use are_immutable_ledger::repository::PostgresLedgerRepository;
 use are_immutable_ledger::service::{HttpEventPublisher, ImmutableLedgerService};
-use tokio_postgres::NoTls;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,10 +47,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let pg = connect_postgres(&config.db_connection_string)
-        .await
-        .context("postgres connect for ledger repository")?;
-    let repo = Arc::new(PostgresLedgerRepository::new(pg));
+    let pool = build_pool(&config).context("postgres pool creation")?;
+    let repo = Arc::new(PostgresLedgerRepository::new(pool));
     let publisher = Arc::new(
         HttpEventPublisher::new(
             config.outbox_http_endpoint.clone(),
@@ -196,18 +193,24 @@ fn authorized_http(headers: &HeaderMap, token: &str) -> bool {
         .is_some_and(|actual| actual == expected)
 }
 
-async fn connect_postgres(
-    url: &str,
-) -> anyhow::Result<std::sync::Arc<tokio::sync::Mutex<tokio_postgres::Client>>> {
-    let (client, connection) = tokio_postgres::connect(url, NoTls)
-        .await
-        .with_context(|| format!("postgres connect to {}", url))?;
-    tokio::spawn(async move {
-        if let Err(err) = connection.await {
-            tracing::error!(error = %err, "postgres connection task ended with error");
-        }
-    });
-    Ok(std::sync::Arc::new(tokio::sync::Mutex::new(client)))
+fn build_pool(config: &AppConfig) -> anyhow::Result<deadpool_postgres::Pool> {
+    let pg_config: tokio_postgres::Config =
+        config.db_connection_string.parse().with_context(|| {
+            format!(
+                "parsing db_connection_string: {}",
+                config.db_connection_string
+            )
+        })?;
+    let manager = deadpool_postgres::Manager::new(pg_config, tokio_postgres::NoTls);
+    let pool = deadpool_postgres::Pool::builder(manager)
+        .max_size(config.pool_max_size)
+        .build()
+        .context("building connection pool")?;
+    info!(
+        pool_max_size = config.pool_max_size,
+        "postgres connection pool created"
+    );
+    Ok(pool)
 }
 
 async fn wait_for_shutdown_signal() -> anyhow::Result<()> {

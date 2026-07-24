@@ -390,6 +390,9 @@ mod tests {
             outbox_http_bearer_token: None,
             outbox_http_timeout_seconds: 10,
             genesis_hash_input: "ARE_LEDGER_GENESIS".to_string(),
+            pool_max_size: 16,
+            chain_max_retries: 10,
+            chain_halt_recovery_seconds: 60,
             api_token: None,
             shutdown_token: None,
         })
