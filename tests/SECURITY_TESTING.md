@@ -141,7 +141,7 @@ These are known limitations, not bugs. They represent design decisions appropria
 | **Static genesis hash** | SHA-256("ARE_LEDGER_GENESIS") is hardcoded | Configurable via `ARE_LEDGER_GENESIS_HASH_INPUT` env var |
 | **Default credentials in demo** | Demo compose uses `ledger/ledger` | Production deploys with proper secrets management |
 | **Advisory lock contention** | Concurrent writes to same chain serialize (~200/sec under contention) | Use distinct entry_types per source; parallel chains scale linearly |
-| **Single DB instance** | All reads/writes through one connection | Read replicas for VerifyProof, connection pooling, partitioning |
+| **Single DB instance** | Connection pool (`deadpool-postgres`, 16 connections) enables parallel reads/writes | Read replicas for VerifyProof, horizontal partitioning for further scale |
 | **No receipt expiry** | Receipts verify indefinitely as long as the entry exists | Downstream services enforce freshness via written_ts check |
 | **Receipts not signed** | Receipts are hash references, not cryptographically signed tokens | The hash IS the proof — it references a chain-linked entry. Signing would add key management complexity without meaningfully stronger guarantees since the ledger is the verifier. |
 

@@ -1,11 +1,18 @@
 # CPEX/AuthBridge Latency Harness Results
 
+## Pre-pool baseline (historical)
+
 Run date: 2026-07-24
-Ledger version: 0.1.0 (single-connection, no pooling)
+Ledger version: 0.1.0 (single-connection, global mutex, 5-retry permanent halt)
 PostgreSQL: 16-alpine (single node, Podman, no tuning)
 Profile: quick (10s per rate, rates: 20/50/100 req/s)
 Host: macOS (Podman VM)
 API path: REST gateway (adds ~1-2ms over raw gRPC)
+
+> **Note:** These numbers reflect the pre-pool architecture. The global mutex
+> and 5-retry circuit breaker have been replaced with `deadpool-postgres`
+> (16 connections), 10 retries with exponential backoff, and auto-recovery.
+> See the before/after comparison in `contracts/cpex-integration-draft.md`.
 
 ## Scenario A — Async Audit Baseline (4 parallel chains)
 
@@ -57,35 +64,30 @@ All writes to one `entry_type` — advisory lock contention stress.
 Advisory lock contention threshold: ~50 req/s per chain
 Chain halt triggered at: 100 req/s (738 errors, throughput collapsed to 11/s)
 
-## Summary for Integration Draft
+## Post-pool results (Scenario D single-chain before/after)
 
-| Operation | Measured p50 | Measured p99 | Throughput | Bottleneck |
-|---|---|---|---|---|
-| IssueReceipt (multi-chain, 100 req/s) | 4.4ms | 23.4ms | 87/s | Global mutex |
-| IssueReceipt (single-chain, 50 req/s) | 4.9ms | 12.9ms | 44/s | Advisory lock |
-| IssueReceipt (single-chain, 100 req/s) | 4.2ms | 220.8ms | 11/s | **Collapsed** — advisory lock + circuit breaker |
-| VerifyProof (under write load) | 2.5ms | 4.9ms | — | Minimal degradation |
-| Receipt round-trip (50 req/s) | 9.3ms | 114.0ms | — | Sum of write + read, p99 tail from mutex |
-| Receipt round-trip (20 req/s) | 10.8ms | 138.5ms | — | Stable, no errors |
+| Load | Before (global mutex) | After (connection pool) |
+|---|---|---|
+| 50 req/s | p50=4.9ms, p99=12.9ms, 0 errors | p50=7.3ms, p99=14.4ms, 0 errors |
+| **100 req/s** | **p50=4.2ms, p99=220ms, 11/s, 738 errors** | **p50=5.9ms, p99=13.8ms, 85/s, 0 errors** |
+| 200 req/s | (not tested) | p50=4.8ms, p99=29.0ms, 113/s, 769 errors |
+
+## Summary
+
+| Operation | Pre-pool | Post-pool | Bottleneck |
+|---|---|---|---|
+| IssueReceipt (multi-chain, 100 req/s) | p99=23.4ms, 87/s | Unchanged (mutex wasn't the bottleneck for multi-chain) | Advisory lock per chain |
+| IssueReceipt (single-chain, 100 req/s) | p99=220ms, 11/s, 738 errors | p99=13.8ms, 85/s, 0 errors | Resolved — global mutex eliminated |
+| VerifyProof (under write load) | p99=4.9ms | Unchanged | Not contention-limited |
 
 ## Observations
 
-1. **Multi-chain scales, single-chain doesn't.** 4 parallel chains at 100 req/s total = 0 errors, 87/s throughput. 1 chain at 100 req/s = 738 errors, 11/s throughput. The `entry_type` namespace convention (cpex.*, authbridge.*) is not just organizational — it's a performance requirement.
+1. **Connection pool fixed the single-chain collapse.** 738 errors → 0 at 100 req/s. Throughput 11/s → 85/s. The global mutex was the bottleneck, not the advisory lock.
 
-2. **VerifyProof is fast and resilient.** Even under mixed read/write load at 100 req/s, VerifyProof stays under 5ms p99. Read replicas would make this even better but aren't strictly needed at this scale.
+2. **Multi-chain was already fine.** 4 parallel chains at 100 req/s = 0 errors both before and after. The pool eliminated false serialization but multi-chain writes were already below the per-chain advisory lock threshold.
 
-3. **p99 tail latency is the concern.** The p50 numbers are fine (4-7ms for IssueReceipt), but p99 spikes to 100ms+ at moderate load. This is the global mutex creating queuing effects. Connection pooling is the fix.
+3. **VerifyProof is fast and resilient.** p99 < 5ms under write load, unchanged by the pool. Read replicas would improve further but aren't needed at this scale.
 
-4. **Round-trip p50 of ~10ms is workable for guardrail dedup.** At 20-50 req/s, the IssueReceipt + VerifyProof round-trip adds ~10ms p50 to the request path. This is acceptable for guardrails that would otherwise take 50-200ms to re-run.
+4. **Round-trip p50 of ~10ms is workable for guardrail dedup.** IssueReceipt + VerifyProof adds ~10ms p50 to the request path via REST. Raw gRPC should be ~50% faster.
 
-5. **REST gateway adds overhead.** These numbers include ~1-2ms of Flask + HTTP overhead. Raw gRPC numbers (from README benchmarks: WriteEntry p50=1.7ms) are significantly better. Production integration should use gRPC directly.
-
-## Recommendations for Sync Receipt Latency Target
-
-Based on measured numbers:
-- Phase 0 (async): no latency budget needed — fire-and-forget
-- Phase 2 (sync): proposed p99 target = **20ms** via gRPC with connection pool
-  - Current REST p99 at 50 req/s = 13ms (IssueReceipt only)
-  - Raw gRPC should be ~50% faster (remove Flask overhead)
-  - Connection pool eliminates the global mutex tail
-  - Read replica for VerifyProof further reduces round-trip
+5. **REST gateway adds overhead.** These numbers include ~1-2ms of Flask + HTTP overhead. Production integration should use gRPC directly.

@@ -181,32 +181,25 @@ advisory lock contention):
 | 50 req/s | 4.9ms | 12.9ms | 44/s | 0 |
 | **100 req/s** | **4.2ms** | **220.8ms** | **11/s** | **738** |
 
-Single-chain throughput collapses above ~50 req/s — the advisory lock +
-global mutex saturates and the 5-retry circuit breaker fires. Multi-chain
-workloads scale linearly because different `entry_type` values acquire
-different advisory locks.
+These pre-pool numbers show single-chain collapse above ~50 req/s due to
+the global mutex and the 5-retry circuit breaker that existed at the time.
+Both bottlenecks have since been resolved — see the before/after comparison
+below.
 
-### What the benchmarks validate (and what they don't)
+### What the benchmarks validate
 
 These benchmarks test the **software architecture**, not the hardware.
-The single-connection global mutex and 5-retry circuit breaker are
-application-level design choices, not infrastructure limits. A faster
-machine wouldn't fix Scenario D — the collapse is caused by advisory lock
-serialization and a circuit breaker that halts chains after 5 contention
-retries. That's a code path, not a CPU bottleneck.
-
-What the benchmarks prove about the design:
+The pre-pool single-chain collapse was caused by advisory lock serialization
+compounded by a global mutex — a code path, not a CPU bottleneck. The
+post-pool results confirm the fix.
 
 | Finding | Architectural implication |
 |---|---|
 | Scenario A (multi-chain) scales linearly to 100 req/s with 0 errors | The `entry_type` namespace convention distributes load across independent advisory locks. The architecture handles concurrency — add chains, not hardware. |
-| Scenario D (single-chain) collapses at 100 req/s | Per-chain serialization is the hard constraint. No amount of hardware fixes this — it's a correctness requirement (chain integrity needs serial writes). The mitigation is architectural: finer-grained `entry_type` values. |
+| Scenario D (single-chain) collapsed at 100 req/s pre-pool, then 0 errors post-pool | The global mutex was the bottleneck, not the advisory lock. Connection pooling eliminated false serialization between chains. |
 | Scenario C (mixed read/write) shows VerifyProof p99 < 5ms under write load | Reads don't degrade meaningfully under write contention. Read replicas would improve this further but aren't strictly required at this scale. |
-| Scenario B (round-trip) p99 spikes to 100ms+ | The p99 tail is caused by the global mutex queuing effect, not database latency. Connection pooling (a code change, not infrastructure) eliminates this. |
 
-What the benchmarks do **not** prove:
-- That connection pooling fixes the p99 tail (it should, but we haven't measured it yet — that's Phase 1 validation)
-- Raw gRPC latency (these numbers include Flask REST overhead; gRPC-direct should be ~50% faster based on README benchmarks)
+Note: pre-pool numbers are from REST API path (adds ~1-2ms over raw gRPC).
 - Behavior at sustained load over minutes/hours (bench ran 10s per rate)
 
 ### Hot path mitigation
@@ -292,19 +285,18 @@ Three modes for CPEX/AuthBridge to choose from, per use case:
 | **Sync `IssueReceipt`** | Guardrail dedup. The next hop needs to verify the receipt to skip re-running the same check. | +3–14ms (p50–p99, current) | Yes, immediately |
 | **Sync with timeout** | Best-effort receipt. Try to get the receipt; fall back to async if the ledger is slow. | Capped at timeout | Degraded if slow |
 
-**Recommendation:** Start with async `WriteEntry` in Phase 0. Sync
-`IssueReceipt` only after the connection pool bottleneck is resolved
-(Phase 1 prerequisite). The current global mutex makes sync writes on the
-request path risky under production load.
+**Recommendation:** Start with async `WriteEntry` in Phase 0 to validate
+the integration surface without adding request-path latency. Sync
+`IssueReceipt` is viable now that the connection pool is in place —
+single-chain at 100 req/s produces 0 errors with p99=13.8ms (post-pool).
 
 ### Throughput scaling
 
 See **Hot path mitigation** above for the full analysis. In short:
 multi-chain scales linearly (measured: 4 chains at 100 req/s = 0 errors).
-Single-chain caps at ~50 writes/sec (measured: 738 errors at 100 req/s).
-The `entry_type` namespace convention distributes load by design. Chain
-splitting and connection pooling are the mitigations — both are
-architectural, not infrastructure.
+Single-chain handles 100 req/s with 0 errors post-pool (was 738 errors
+pre-pool). The `entry_type` namespace convention distributes load by
+design. Chain splitting provides additional headroom for hot chains.
 
 ## 6. Phased Plan
 

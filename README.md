@@ -228,7 +228,7 @@ Each adapter is 100-150 lines of Python. Direct gRPC integration is ~30 lines. T
 ## Project Structure
 
 ```
-proto/                     The universal contract (10 RPCs)
+proto/                     The universal contract (9 RPCs)
 src/                       Ledger server (Rust, gRPC, PostgreSQL)
 migrations/                Database schema (append-only constraints + hash index)
 contracts/                 Integration contracts (fleet ecosystem, CPEX/AuthBridge/Praxis)
@@ -240,7 +240,7 @@ api/                       REST gateway for frontend (Flask)
 frontend/                  7-act narrative proof explorer (React + Vite + motion)
 demo/                      Self-contained demo with compose (includes joint CPEX/AuthBridge scenarios)
 scripts/perf/              Latency benchmarks (k6 + Python harness)
-tests/                     Evidence matrix: 116 tests across 18 categories
+tests/                     Evidence matrix and 146 automated checks
 ```
 
 ## Why This Exists
