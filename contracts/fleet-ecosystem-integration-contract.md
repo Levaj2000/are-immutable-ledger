@@ -109,3 +109,11 @@ it does not create a direct DeepField-to-ledger runtime path.
 
 This is contract-level ledger evidence only. It does not claim that the four
 repositories were assembled, deployed, or exercised against live clusters.
+
+## Related contracts
+
+- [`cpex-integration-draft.md`](cpex-integration-draft.md) — integration draft
+  for CPEX (policy enforcement), AuthBridge (sidecar identity/auth), and Praxis
+  (AI-native proxy). Covers proof receipt propagation between enforcement points,
+  field mapping, latency analysis, and a phased plan. The CPEX integration uses
+  the same `correlation_id` and `entry_type` conventions documented here.
