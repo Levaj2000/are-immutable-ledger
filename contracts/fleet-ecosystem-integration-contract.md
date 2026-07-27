@@ -10,7 +10,7 @@ Two integration paths are currently defined:
 
 - **Fleet ecosystem:** `deepfield-fleet -> governed-cognitive-loop -> fleet-llm-d -> immutable ledger`
 - **CPEX / AuthBridge / Praxis:** policy enforcement and guardrail dedup
-  via proof receipts (see [`cpex-integration-draft.md`](cpex-integration-draft.md))
+  via proof receipts
 
 The producer repositories own their event and payload schemas. The conventions
 in this contract — `entry_type` namespacing, `correlation_id` threading, proof
@@ -136,9 +136,8 @@ The next hop calls `VerifyProof(entry_hash, entry_type)`. If valid and
 check. If `input_hash` doesn't match (payload was transformed between hops),
 the downstream hop re-runs its check and issues its own receipt.
 
-See [`cpex-integration-draft.md`](cpex-integration-draft.md) Section 4 for the
-full multi-hop flow diagram and `demo/joint-cpex/scenarios/07-multi-hop-receipt-chain.sh`
-for an executable example.
+See `demo/joint-cpex/scenarios/07-multi-hop-receipt-chain.sh` for an executable
+example.
 
 ## Correlation
 

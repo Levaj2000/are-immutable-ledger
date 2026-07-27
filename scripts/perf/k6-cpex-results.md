@@ -12,7 +12,7 @@ API path: REST gateway (adds ~1-2ms over raw gRPC)
 > **Note:** These numbers reflect the pre-pool architecture. The global mutex
 > and 5-retry circuit breaker have been replaced with `deadpool-postgres`
 > (16 connections), 10 retries with exponential backoff, and auto-recovery.
-> See the before/after comparison in `contracts/cpex-integration-draft.md`.
+> See the before/after comparison in the integration draft (shared separately).
 
 ## Scenario A — Async Audit Baseline (4 parallel chains)
 
