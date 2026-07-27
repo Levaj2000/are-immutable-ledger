@@ -10,7 +10,7 @@ use super::{
     ledger_written_payload, ChainTip, EntryQuery, EntryWriteInput, LedgerEntryRecord,
     LedgerRepository, OutboxRecord, OutboxStatus, QueryResult, RepositoryError, WriteResult,
 };
-use crate::crypto::{canonical_entry_hash, CanonicalEntryHashInput};
+use crate::crypto::{advisory_lock_key, canonical_entry_hash, CanonicalEntryHashInput};
 
 pub struct PostgresLedgerRepository {
     pool: Pool,
@@ -77,12 +77,10 @@ impl LedgerRepository for PostgresLedgerRepository {
             .await
             .map_err(|_| RepositoryError::Unavailable)?;
 
-        tx.execute(
-            "SELECT pg_advisory_xact_lock(abs(hashtext($1::text))::bigint)",
-            &[&input.entry_type],
-        )
-        .await
-        .map_err(|_| RepositoryError::Unavailable)?;
+        let lock_key = advisory_lock_key(&input.entry_type);
+        tx.execute("SELECT pg_advisory_xact_lock($1::bigint)", &[&lock_key])
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
 
         let tip_row = tx
             .query_opt(
@@ -360,6 +358,32 @@ impl LedgerRepository for PostgresLedgerRepository {
                  WHERE entry_type = $1
                  ORDER BY chain_position",
                 &[&entry_type],
+            )
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        Ok(rows.iter().map(Self::map_row_entry).collect())
+    }
+
+    async fn get_entries_by_type_paged(
+        &self,
+        entry_type: &str,
+        after_position: i64,
+        limit: i64,
+    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        let rows = client
+            .query(
+                "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                 FROM are_ledger.ledger_entries
+                 WHERE entry_type = $1 AND chain_position > $2
+                 ORDER BY chain_position
+                 LIMIT $3",
+                &[&entry_type, &after_position, &limit],
             )
             .await
             .map_err(|_| RepositoryError::Unavailable)?;

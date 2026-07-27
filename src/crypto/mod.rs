@@ -24,6 +24,13 @@ pub fn sha256_hex(value: &[u8]) -> String {
     hex::encode(hasher.finalize())
 }
 
+pub fn advisory_lock_key(entry_type: &str) -> i64 {
+    let mut hasher = Sha256::new();
+    hasher.update(entry_type.as_bytes());
+    let hash = hasher.finalize();
+    i64::from_be_bytes(hash[..8].try_into().unwrap())
+}
+
 pub fn canonical_entry_hash(input: &CanonicalEntryHashInput<'_>) -> String {
     let mut bytes = Vec::with_capacity(input.content.len() + 512);
     bytes.extend_from_slice(ENTRY_HASH_VERSION.as_bytes());
@@ -140,5 +147,29 @@ mod tests {
         assert_ne!(baseline, canonical_entry_hash(&changed_correlation));
         assert_ne!(baseline, canonical_entry_hash(&changed_position));
         assert_ne!(baseline, changed_entry_id);
+    }
+
+    #[test]
+    fn advisory_lock_key_is_deterministic() {
+        let key1 = advisory_lock_key("cpex.policy.allow");
+        let key2 = advisory_lock_key("cpex.policy.allow");
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn advisory_lock_key_differs_for_different_types() {
+        let keys: Vec<i64> = vec![
+            advisory_lock_key("cpex.policy.allow"),
+            advisory_lock_key("cpex.policy.deny"),
+            advisory_lock_key("authbridge.token.exchanged"),
+            advisory_lock_key("authbridge.tool.denied"),
+            advisory_lock_key("openshell.http_activity"),
+            advisory_lock_key("kagenti.tool.call"),
+        ];
+        for i in 0..keys.len() {
+            for j in (i + 1)..keys.len() {
+                assert_ne!(keys[i], keys[j], "collision between index {i} and {j}");
+            }
+        }
     }
 }
