@@ -41,7 +41,7 @@ No shared identity system required. No event format standardization required. Ea
 - **Append-only** - database constraints enforce no UPDATE/DELETE on ledger entries. Startup verification confirms permissions.
 - **Per-type hash chains** - each `entry_type` forms its own SHA-256 chain. Independent verification per source system.
 - **V2 canonical proof envelope** - hashes commit to entry ID, metadata, content, idempotency key, chain position, timestamp, and previous hash using length-delimited fields.
-- **Concurrent-safe** - PostgreSQL advisory locks serialize writes per chain. Integrity violations trigger circuit breaker after 5 retries.
+- **Concurrent-safe** - connection pool (`deadpool-postgres`, configurable max size) with per-`entry_type` PostgreSQL advisory locks. Writes to different chains run in parallel. Integrity violations trigger exponential backoff retry (up to 10 attempts, configurable) with auto-recovery after 60 seconds.
 - **Idempotent** - optional idempotency keys prevent duplicate entries on retry; reusing a key with different content or metadata returns a conflict.
 - **Cross-system queries** - `QueryEntries` filters by agent_id, correlation_id, source_id, entry_type prefix, and time range. One query returns entries from all sources for the same agent or request.
 - **Hardened admin surface** - `/shutdownz` is disabled unless `ARE_LEDGER_SHUTDOWN_TOKEN` is set and requires a bearer token when enabled. gRPC bearer-token auth can be enabled with `ARE_LEDGER_API_TOKEN`.
@@ -82,22 +82,22 @@ Receipts are NOT credentials — they prove a check ran, they don't grant author
 
 ## Performance
 
-Benchmarked on Podman-hosted PostgreSQL (single node, no tuning):
+Benchmarked on Podman-hosted PostgreSQL 16 (single node, no tuning) using CPEX-shaped workloads via REST API (`scripts/perf/cpex-latency-bench.py`):
 
-| Operation | p50 | p95 | p99 | Throughput |
+| Scenario | p50 | p99 | Throughput | Errors |
 |---|---|---|---|---|
-| WriteEntry | 1.7ms | 2.9ms | 4.3ms | ~520/sec |
-| IssueReceipt | 2.9ms | 7.2ms | 13.9ms | ~280/sec |
-| VerifyProof | 0.6ms | 1.3ms | 1.7ms | ~1,400/sec |
-| VerifyProof (under write load) | 0.9ms | — | 1.9ms | — |
-| GetChainTip (200-entry chain) | 0.4ms | — | 0.6ms | — |
+| IssueReceipt (4 parallel chains, 100 req/s) | 4.4ms | 23.4ms | 87/s | 0 |
+| IssueReceipt (single chain, 100 req/s) | 5.9ms | 13.8ms | 85/s | 0 |
+| VerifyProof (under write load, 100 req/s) | 2.5ms | 4.9ms | — | 0 |
+| Receipt round-trip (IssueReceipt + VerifyProof, 50 req/s) | 9.3ms | 114.0ms | — | 0 |
+
+Raw gRPC numbers (no REST overhead): WriteEntry p50=1.7ms p99=4.3ms ~520/sec, VerifyProof p50=0.6ms p99=1.7ms ~1,400/sec.
 
 ### Known Scale Considerations
 
 | Concern | Current behavior | Mitigation path |
 |---|---|---|
-| **Advisory lock contention** | Writes to the same `entry_type` serialize via PostgreSQL advisory locks. 5 concurrent writers to ONE chain: ~200 writes/sec with errors. | Use distinct `entry_type` per source. Parallel chains scale linearly — 5 chains = 5x throughput. |
-| **Single PostgreSQL instance** | All reads and writes go through one database connection. | Read replicas for VerifyProof. Connection pooling (PgBouncer). Horizontal partitioning by entry_type prefix. |
+| **Advisory lock contention** | Writes to the same `entry_type` serialize via PostgreSQL advisory locks. Single-chain saturation at ~100-200 writes/sec. | Use distinct `entry_type` per source. Parallel chains scale linearly — 4 chains at 100 req/s = 0 errors. Split hot chains by tool or instance. |
 | **Chain verification on long chains** | VerifyChain reads all entries for an entry_type. 200-entry chain: fine. 1M entries: full table scan. | Add chain verification checkpoints. Verify only the last N entries from a known-good checkpoint. |
 | **Storage growth** | Each entry stores full content bytes (up to 1 MiB). High-volume systems generate significant storage. | Content compression. Content-addressed storage (store hash, external blob). TTL-based archival. |
 | **gRPC message size** | QueryEntries can return large result sets. Default 4MB gRPC limit hit at ~3K entries. | Pagination (already implemented). Client must page through results. |
@@ -121,6 +121,8 @@ The repository keeps the proof surface close to the code:
 - `contracts/fleet-ecosystem-integration-contract.md` defines the proof-only boundary
   and canonical API mapping for deepfield-fleet, governed-cognitive-loop, and
   fleet-llm-d integration.
+- `contracts/cpex-integration-draft.md` proposes integration with CPEX, AuthBridge,
+  and Praxis — field mapping, proof receipt flow, latency analysis, and phased plan.
 - `proof-explorer/proof.py verify --all` independently verifies stored chains through the public API.
 
 Current checked-in evidence shows `146/146` automated checks GREEN. The matrix still keeps design-level/manual items as YELLOW until those checks are automated in `tests/run_evidence.py`.
@@ -136,11 +138,22 @@ python proof-explorer/proof.py verify --all
 
 The service exposes Prometheus metrics at `/metrics` on `ARE_LEDGER_METRICS_PORT`:
 
-- `are_ledger_write_total`
-- `are_ledger_chain_verify_failure_total`
-- `are_outbox_publish_failure_total`
+- `are_ledger_write_total` — write attempts by outcome (ok, invalid, error)
+- `are_ledger_write_duration_seconds` — write latency histogram
+- `are_ledger_verify_duration_seconds` — verification latency histogram
+- `are_ledger_chain_integrity_retries` — retry attempts per write due to chain contention
+- `are_ledger_chain_verify_failure_total` — chain verification detected invalid link or hash
+- `are_outbox_publish_failure_total` — outbox HTTP publish failures
 
 The standalone binary can deliver committed outbox events to an HTTP event sink. Set `ARE_LEDGER_OUTBOX_HTTP_ENDPOINT` to enable delivery, optionally set `ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN`, and use `ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS` to override the 10-second request timeout. Each request contains the stored JSON payload plus `Idempotency-Key` (the outbox ID) and `X-Ledger-Entry-ID` headers. Successful 2xx responses mark the row `DELIVERED`; transport errors and non-2xx responses leave it `PENDING` for retry. Consumers must deduplicate by `Idempotency-Key` because delivery is at least once. When the endpoint is unset, publishing is disabled and rows remain `PENDING`.
+
+Connection pool and chain recovery are configurable:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ARE_LEDGER_POOL_MAX_SIZE` | 16 | PostgreSQL connection pool max size |
+| `ARE_LEDGER_CHAIN_MAX_RETRIES` | 10 | Retry attempts per write before chain halt |
+| `ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS` | 60 | Auto-recovery timeout for halted chains |
 
 Hash compatibility note: this pre-release standalone ledger uses the V2 canonical proof envelope as its initial public contract. No production data has been written with the earlier experimental hash shape; if you have local demo data from before V2, reload it.
 
@@ -205,10 +218,8 @@ Each adapter is 100-150 lines of Python. Direct gRPC integration is ~30 lines. T
 
 ## Scaling Roadmap
 
-The current implementation is intentionally small and correctness-first. A practical scale-up path is:
-
-1. **Pool PostgreSQL connections.** Replace the single mutex-wrapped client with a connection pool while retaining per-`entry_type` advisory locks for chain serialization.
-2. **Measure the bottlenecks.** Add histograms/counters for write latency, advisory-lock wait time, idempotency conflicts, chain-integrity retries, query latency, verification latency, and outbox age.
+1. ~~**Pool PostgreSQL connections.**~~ **Done.** `deadpool-postgres` connection pool (configurable via `ARE_LEDGER_POOL_MAX_SIZE`, default 16) replaces the single mutex-wrapped client. Per-`entry_type` advisory locks retained for chain serialization. Measured result: single-chain at 100 req/s went from 738 errors / 11 req/s to 0 errors / 85 req/s.
+2. ~~**Measure the bottlenecks.**~~ **Done.** Prometheus histograms for write duration, verification duration, and chain integrity retries. CPEX-shaped latency bench at `scripts/perf/cpex-latency-bench.py`.
 3. **Partition ledger storage.** Partition `ledger_entries` by time, tenant, or chain namespace once volume grows, and keep indexes aligned to `entry_type`, `agent_id`, `source_id`, `correlation_id`, and `written_ts` queries.
 4. **Add verification checkpoints.** Periodically persist signed/checkpointed chain tips or Merkle roots so long-chain verification can resume from known-good anchors instead of replaying from genesis every time.
 5. **Separate large payloads when needed.** Keep small event content inline; for large payloads, store a content hash in the ledger and move raw bytes to object storage.
@@ -217,17 +228,19 @@ The current implementation is intentionally small and correctness-first. A pract
 ## Project Structure
 
 ```
-proto/                     The universal contract (10 RPCs)
+proto/                     The universal contract (9 RPCs)
 src/                       Ledger server (Rust, gRPC, PostgreSQL)
 migrations/                Database schema (append-only constraints + hash index)
+contracts/                 Integration contracts (fleet ecosystem, CPEX/AuthBridge/Praxis)
 sdks/python/               Python client SDK (WriteEntry, IssueReceipt, VerifyProof, GetEntryByHash)
 adapters/ocsf/             OpenShell OCSF event bridge
 adapters/otel/             Kagenti/OTEL span bridge
 proof-explorer/            Query, verify, timeline, and drift CLI
 api/                       REST gateway for frontend (Flask)
 frontend/                  7-act narrative proof explorer (React + Vite + motion)
-demo/                      Self-contained demo with compose
-tests/                     Evidence matrix: 116 tests across 18 categories
+demo/                      Self-contained demo with compose (includes joint CPEX/AuthBridge scenarios)
+scripts/perf/              Latency benchmarks (k6 + Python harness)
+tests/                     Evidence matrix and 146 automated checks
 ```
 
 ## Why This Exists

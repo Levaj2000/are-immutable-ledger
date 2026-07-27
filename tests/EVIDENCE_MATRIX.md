@@ -121,7 +121,7 @@ Last run: tests/evidence-results.json (146/146 GREEN automated; 10 matrix items 
 | ID | Test | Expected | Status | Evidence |
 |---|---|---|---|---|
 | L10.01 | Concurrent writes from multiple sources don't corrupt chains | Advisory locks prevent race conditions | GREEN | tests/evidence-results.json |
-| L10.02 | Chain integrity violation triggers retry (up to 5 attempts) | Circuit breaker behavior documented | GREEN | tests/evidence-results.json |
+| L10.02 | Chain integrity violation triggers retry (up to 10 attempts, configurable) with exponential backoff and auto-recovery | Retry and recovery behavior documented | GREEN | tests/evidence-results.json |
 | L10.03 | Large content (up to 1 MiB) accepted | Content size within limit stored | GREEN | tests/evidence-results.json |
 | L10.04 | Content exceeding max size rejected | Clear error, no partial write | GREEN | tests/evidence-results.json |
 | L10.05 | Ledger restart preserves all chains | Chains verify after restart | GREEN | tests/evidence-results.json |

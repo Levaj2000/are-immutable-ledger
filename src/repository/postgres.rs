@@ -1,11 +1,9 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
+use deadpool_postgres::Pool;
 use postgres_types::Json;
 use serde_json::Value;
-use tokio::sync::Mutex;
 use tokio_postgres::error::SqlState;
-use tokio_postgres::{Client, Row};
+use tokio_postgres::Row;
 use uuid::Uuid;
 
 use super::{
@@ -14,14 +12,13 @@ use super::{
 };
 use crate::crypto::{canonical_entry_hash, CanonicalEntryHashInput};
 
-/// Append-only ledger + outbox backed by PostgreSQL (`migrations/*.sql`).
 pub struct PostgresLedgerRepository {
-    client: Arc<Mutex<Client>>,
+    pool: Pool,
 }
 
 impl PostgresLedgerRepository {
-    pub fn new(client: Arc<Mutex<Client>>) -> Self {
-        Self { client }
+    pub fn new(pool: Pool) -> Self {
+        Self { pool }
     }
 
     fn map_row_entry(row: &Row) -> LedgerEntryRecord {
@@ -70,7 +67,11 @@ impl LedgerRepository for PostgresLedgerRepository {
         &self,
         input: EntryWriteInput,
     ) -> Result<WriteResult, RepositoryError> {
-        let mut client = self.client.lock().await;
+        let mut client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let tx = client
             .transaction()
             .await
@@ -232,7 +233,11 @@ impl LedgerRepository for PostgresLedgerRepository {
     }
 
     async fn get_entry(&self, entry_id: Uuid) -> Result<LedgerEntryRecord, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
@@ -247,7 +252,11 @@ impl LedgerRepository for PostgresLedgerRepository {
     }
 
     async fn query_entries(&self, query: EntryQuery) -> Result<QueryResult, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let from_seconds = query.from_ts_ms.map(|ts| ts as f64 / 1000.0);
         let to_seconds = query.to_ts_ms.map(|ts| ts as f64 / 1000.0);
         let limit = query.limit as i64;
@@ -309,7 +318,11 @@ impl LedgerRepository for PostgresLedgerRepository {
     }
 
     async fn get_chain_tip(&self, entry_type: &str) -> Result<ChainTip, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_hash, chain_position, written_ts
@@ -334,7 +347,11 @@ impl LedgerRepository for PostgresLedgerRepository {
         &self,
         entry_type: &str,
     ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let rows = client
             .query(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
@@ -354,7 +371,11 @@ impl LedgerRepository for PostgresLedgerRepository {
         entry_type: &str,
         entry_hash: &str,
     ) -> Result<LedgerEntryRecord, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
@@ -374,7 +395,11 @@ impl LedgerRepository for PostgresLedgerRepository {
         entry_type: &str,
         idempotency_key: &str,
     ) -> Result<Option<LedgerEntryRecord>, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
@@ -389,7 +414,11 @@ impl LedgerRepository for PostgresLedgerRepository {
     }
 
     async fn pending_outbox(&self) -> Result<Vec<OutboxRecord>, RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let rows = client
             .query(
                 "SELECT outbox_id, entry_id, entry_type, payload, status, attempt_count
@@ -404,7 +433,11 @@ impl LedgerRepository for PostgresLedgerRepository {
     }
 
     async fn mark_outbox_delivered(&self, outbox_id: Uuid) -> Result<(), RepositoryError> {
-        let client = self.client.lock().await;
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
         let n = client
             .execute(
                 "UPDATE are_ledger.ledger_write_outbox

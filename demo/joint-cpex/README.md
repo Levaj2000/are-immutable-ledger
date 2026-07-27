@@ -33,12 +33,15 @@ HR MCP Server (:9100)               PostgreSQL (:54330)
 
 ## Scenarios
 
-| # | Script | CPEX Scenario | What it demonstrates |
+| # | Script | Scenario | What it demonstrates |
 |---|---|---|---|
-| 01 | bob-allow-receipt.sh | scenario 01 | Allow + delegation → receipt issued + verified |
-| 02 | alice-deny-receipt.sh | scenario 02 | APL deny → denial reason recorded in receipt |
-| 03 | taint-chain.sh | scenario 08 | Allow → taint → deny → trust chain shows both |
-| 04 | redact-inputhash.sh | scenario 03 | SSN redacted → input_hash detects payload change |
+| 01 | bob-allow-receipt.sh | CPEX 01 | Allow + delegation → receipt issued + verified |
+| 02 | alice-deny-receipt.sh | CPEX 02 | APL deny → denial reason recorded in receipt |
+| 03 | taint-chain.sh | CPEX 08 | Allow → taint → deny → trust chain shows both |
+| 04 | redact-inputhash.sh | CPEX 03 | SSN redacted → input_hash detects payload change |
+| 05 | authbridge-token-exchange.sh | AuthBridge | Token exchange (SPIFFE → OAuth) → receipt issued |
+| 06 | authbridge-deny-receipt.sh | AuthBridge | Tool access denied → denial receipt with input_hash |
+| 07 | multi-hop-receipt-chain.sh | Multi-hop | AuthBridge PII scan → CPEX verifies receipt → skips re-scan → issues own receipt → cross-system correlation verified |
 
 ## Quick Start
 

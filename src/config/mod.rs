@@ -14,6 +14,9 @@ pub struct AppConfig {
     pub outbox_http_bearer_token: Option<String>,
     pub outbox_http_timeout_seconds: u64,
     pub genesis_hash_input: String,
+    pub pool_max_size: usize,
+    pub chain_max_retries: u32,
+    pub chain_halt_recovery_seconds: u64,
     pub api_token: Option<String>,
     pub shutdown_token: Option<String>,
 }
@@ -44,6 +47,12 @@ impl AppConfig {
             )?,
             genesis_hash_input: env::var("ARE_LEDGER_GENESIS_HASH_INPUT")
                 .unwrap_or_else(|_| "ARE_LEDGER_GENESIS".to_string()),
+            pool_max_size: parse_usize("ARE_LEDGER_POOL_MAX_SIZE", 16)?,
+            chain_max_retries: parse_usize("ARE_LEDGER_CHAIN_MAX_RETRIES", 10)? as u32,
+            chain_halt_recovery_seconds: parse_nonzero_u64(
+                "ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS",
+                60,
+            )?,
             api_token: env::var("ARE_LEDGER_API_TOKEN").ok(),
             shutdown_token: env::var("ARE_LEDGER_SHUTDOWN_TOKEN").ok(),
         })
