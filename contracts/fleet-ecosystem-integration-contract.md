@@ -90,8 +90,8 @@ via `ARE_LEDGER_POOL_MAX_SIZE`, default 16). Writes to different `entry_type`
 chains acquire separate connections and separate per-type advisory locks,
 running truly in parallel.
 
-Writes to the same `entry_type` chain serialize through
-`pg_advisory_xact_lock(hashtext(entry_type))`. On contention, the write retries
+Writes to the same `entry_type` chain serialize through a per-type
+PostgreSQL advisory lock (SHA-256-derived 64-bit key). On contention, the write retries
 with exponential backoff (10ms, 20ms, 40ms, ...) up to a configurable maximum
 (`ARE_LEDGER_CHAIN_MAX_RETRIES`, default 10). If all retries exhaust, the chain
 is temporarily halted and auto-recovers after a configurable timeout

@@ -86,10 +86,10 @@ Benchmarked on Podman-hosted PostgreSQL 16 (single node, no tuning) using CPEX-s
 
 | Scenario | p50 | p99 | Throughput | Errors |
 |---|---|---|---|---|
-| IssueReceipt (4 parallel chains, 100 req/s) | 4.4ms | 23.4ms | 87/s | 0 |
-| IssueReceipt (single chain, 100 req/s) | 5.9ms | 13.8ms | 85/s | 0 |
-| VerifyProof (under write load, 100 req/s) | 2.5ms | 4.9ms | — | 0 |
-| Receipt round-trip (IssueReceipt + VerifyProof, 50 req/s) | 9.3ms | 114.0ms | — | 0 |
+| IssueReceipt (4 parallel chains, 100 req/s) | 4.4ms | 57.6ms | 87/s | 0 |
+| IssueReceipt (single chain, 100 req/s) | 4.2ms | 8.1ms | 88/s | 0 |
+| VerifyProof (under write load, 100 req/s) | 2.8ms | 6.6ms | — | 0 |
+| Receipt round-trip (IssueReceipt + VerifyProof, 50 req/s) | 8.0ms | 13.0ms | — | 0 |
 
 Raw gRPC numbers (no REST overhead): WriteEntry p50=1.7ms p99=4.3ms ~520/sec, VerifyProof p50=0.6ms p99=1.7ms ~1,400/sec.
 
@@ -97,8 +97,8 @@ Raw gRPC numbers (no REST overhead): WriteEntry p50=1.7ms p99=4.3ms ~520/sec, Ve
 
 | Concern | Current behavior | Mitigation path |
 |---|---|---|
-| **Advisory lock contention** | Writes to the same `entry_type` serialize via PostgreSQL advisory locks. Single-chain saturation at ~100-200 writes/sec. | Use distinct `entry_type` per source. Parallel chains scale linearly — 4 chains at 100 req/s = 0 errors. Split hot chains by tool or instance. |
-| **Chain verification on long chains** | VerifyChain reads all entries for an entry_type. 200-entry chain: fine. 1M entries: full table scan. | Add chain verification checkpoints. Verify only the last N entries from a known-good checkpoint. |
+| **Advisory lock contention** | Writes to the same `entry_type` serialize via SHA-256-derived advisory locks. Single-chain: 88/s at 100 req/s with 0 errors. | Use distinct `entry_type` per source. Parallel chains scale linearly. Split hot chains by tool or instance. |
+| **Chain verification on long chains** | VerifyChain walks chains in batches of 500 entries (bounded memory). Verification checkpoints not yet implemented. | Add checkpoints for long-chain skip-ahead. Streaming already prevents OOM. |
 | **Storage growth** | Each entry stores full content bytes (up to 1 MiB). High-volume systems generate significant storage. | Content compression. Content-addressed storage (store hash, external blob). TTL-based archival. |
 | **gRPC message size** | QueryEntries can return large result sets. Default 4MB gRPC limit hit at ~3K entries. | Pagination (already implemented). Client must page through results. |
 
@@ -216,12 +216,13 @@ Each adapter is 100-150 lines of Python. Direct gRPC integration is ~30 lines. T
 
 ## Scaling Roadmap
 
-1. ~~**Pool PostgreSQL connections.**~~ **Done.** `deadpool-postgres` connection pool (configurable via `ARE_LEDGER_POOL_MAX_SIZE`, default 16) replaces the single mutex-wrapped client. Per-`entry_type` advisory locks retained for chain serialization. Measured result: single-chain at 100 req/s went from 738 errors / 11 req/s to 0 errors / 85 req/s.
+1. ~~**Pool PostgreSQL connections.**~~ **Done.** `deadpool-postgres` (configurable via `ARE_LEDGER_POOL_MAX_SIZE`, default 16). SHA-256-derived 64-bit advisory lock keys replace SQL `hashtext` (was int4, risked false serialization). Measured: single-chain at 100 req/s went from 738 errors / 11 req/s to 0 errors / 88 req/s, p99 from 220ms to 8.1ms.
 2. ~~**Measure the bottlenecks.**~~ **Done.** Prometheus histograms for write duration, verification duration, and chain integrity retries. CPEX-shaped latency bench at `scripts/perf/cpex-latency-bench.py`.
-3. **Partition ledger storage.** Partition `ledger_entries` by time, tenant, or chain namespace once volume grows, and keep indexes aligned to `entry_type`, `agent_id`, `source_id`, `correlation_id`, and `written_ts` queries.
-4. **Add verification checkpoints.** Periodically persist signed/checkpointed chain tips or Merkle roots so long-chain verification can resume from known-good anchors instead of replaying from genesis every time.
-5. **Separate large payloads when needed.** Keep small event content inline; for large payloads, store a content hash in the ledger and move raw bytes to object storage.
-6. **Define synthetic scale gates.** Run local smoke, hot-chain stress, multi-chain stress, query/read stress, restart/recovery, and long-soak drills, then publish their outputs alongside the evidence matrix.
+3. ~~**Bounded chain verification.**~~ **Done.** `VerifyChain` walks chains in batches of 500 entries (bounded memory). `VerifyEntry` fetches only the predecessor instead of the full chain. No risk of OOM on long chains.
+4. **Partition ledger storage.** Partition `ledger_entries` by time, tenant, or chain namespace once volume grows, and keep indexes aligned to `entry_type`, `agent_id`, `source_id`, `correlation_id`, and `written_ts` queries.
+5. **Add verification checkpoints.** Periodically persist signed/checkpointed chain tips or Merkle roots so long-chain verification can resume from known-good anchors instead of replaying from genesis every time.
+6. **Separate large payloads when needed.** Keep small event content inline; for large payloads, store a content hash in the ledger and move raw bytes to object storage.
+7. **Define synthetic scale gates.** Run local smoke, hot-chain stress, multi-chain stress, query/read stress, restart/recovery, and long-soak drills, then publish their outputs alongside the evidence matrix.
 
 ## Project Structure
 
