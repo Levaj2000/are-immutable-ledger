@@ -463,15 +463,12 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         let chain_link_valid = if entry.chain_position == 1 {
             entry.previous_hash == sha256_hex(self.config.genesis_hash_input.as_bytes())
         } else {
-            let chain = self
+            let predecessors = self
                 .repo
-                .get_entries_by_type(&entry.entry_type)
+                .get_entries_by_type_paged(&entry.entry_type, entry.chain_position - 2, 1)
                 .await
                 .map_err(map_repo)?;
-            let previous = chain
-                .iter()
-                .find(|candidate| candidate.chain_position == entry.chain_position - 1);
-            match previous {
+            match predecessors.first() {
                 Some(prev) => prev.entry_hash == entry.previous_hash,
                 None => false,
             }
@@ -498,92 +495,108 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         start_entry_id: Option<Uuid>,
         end_entry_id: Option<Uuid>,
     ) -> Result<VerifyChainOutput, ServiceError> {
-        let entries = self
-            .repo
-            .get_entries_by_type(entry_type)
-            .await
-            .map_err(map_repo)?;
-        if entries.is_empty() {
-            return Ok(VerifyChainOutput {
-                chain_valid: true,
-                entries_checked: 0,
-                first_invalid_entry_id: None,
-                failure_reason: String::new(),
-            });
-        }
+        const BATCH_SIZE: i64 = 500;
+
         let start_position = if let Some(id) = start_entry_id {
-            entries
-                .iter()
-                .find(|entry| entry.entry_id == id)
-                .map(|entry| entry.chain_position)
-                .ok_or(ServiceError::NotFound)?
+            let entry = self.repo.get_entry(id).await.map_err(map_repo)?;
+            entry.chain_position
         } else {
             1
         };
+
         let end_position = if let Some(id) = end_entry_id {
-            entries
-                .iter()
-                .find(|entry| entry.entry_id == id)
-                .map(|entry| entry.chain_position)
-                .ok_or(ServiceError::NotFound)?
+            let entry = self.repo.get_entry(id).await.map_err(map_repo)?;
+            entry.chain_position
         } else {
-            entries
-                .iter()
-                .map(|entry| entry.chain_position)
-                .max()
-                .unwrap_or(0)
+            i64::MAX
         };
-        let mut filtered = entries
-            .into_iter()
-            .filter(|entry| {
-                entry.chain_position >= start_position && entry.chain_position <= end_position
-            })
-            .collect::<Vec<_>>();
-        filtered.sort_by_key(|entry| entry.chain_position);
-        for (idx, entry) in filtered.iter().enumerate() {
-            let prev_hash = if idx == 0 && entry.chain_position == 1 {
-                sha256_hex(self.config.genesis_hash_input.as_bytes())
-            } else if idx > 0 {
-                filtered[idx - 1].entry_hash.clone()
-            } else {
-                entry.previous_hash.clone()
-            };
-            if entry.previous_hash != prev_hash {
-                crate::metrics::LEDGER_CHAIN_VERIFY_FAILURE_TOTAL.inc();
-                return Ok(VerifyChainOutput {
-                    chain_valid: false,
-                    entries_checked: idx as i64 + 1,
-                    first_invalid_entry_id: Some(entry.entry_id),
-                    failure_reason: "chain_link_mismatch".to_string(),
-                });
+
+        let genesis = sha256_hex(self.config.genesis_hash_input.as_bytes());
+        let mut prev_hash = if start_position == 1 {
+            genesis
+        } else {
+            let predecessors = self
+                .repo
+                .get_entries_by_type_paged(entry_type, start_position - 2, 1)
+                .await
+                .map_err(map_repo)?;
+            match predecessors.first() {
+                Some(prev) => prev.entry_hash.clone(),
+                None => {
+                    return Ok(VerifyChainOutput {
+                        chain_valid: false,
+                        entries_checked: 0,
+                        first_invalid_entry_id: None,
+                        failure_reason: "predecessor_not_found".to_string(),
+                    });
+                }
             }
-            let recomputed = canonical_entry_hash(&CanonicalEntryHashInput {
-                entry_id: entry.entry_id,
-                entry_type: &entry.entry_type,
-                agent_id: &entry.agent_id,
-                content: &entry.content,
-                content_type: &entry.content_type,
-                source_id: &entry.source_id,
-                correlation_id: entry.correlation_id.as_deref(),
-                idempotency_key: entry.idempotency_key.as_deref(),
-                input_hash: entry.input_hash.as_deref(),
-                chain_position: entry.chain_position,
-                written_ts_ms: entry.written_ts.timestamp_millis(),
-                previous_hash: &entry.previous_hash,
-            });
-            if entry.entry_hash != recomputed {
-                crate::metrics::LEDGER_CHAIN_VERIFY_FAILURE_TOTAL.inc();
-                return Ok(VerifyChainOutput {
-                    chain_valid: false,
-                    entries_checked: idx as i64 + 1,
-                    first_invalid_entry_id: Some(entry.entry_id),
-                    failure_reason: "entry_hash_mismatch".to_string(),
+        };
+
+        let mut after_position = start_position - 1;
+        let mut entries_checked: i64 = 0;
+
+        loop {
+            let batch = self
+                .repo
+                .get_entries_by_type_paged(entry_type, after_position, BATCH_SIZE)
+                .await
+                .map_err(map_repo)?;
+            if batch.is_empty() {
+                break;
+            }
+            for entry in &batch {
+                if entry.chain_position > end_position {
+                    return Ok(VerifyChainOutput {
+                        chain_valid: true,
+                        entries_checked,
+                        first_invalid_entry_id: None,
+                        failure_reason: String::new(),
+                    });
+                }
+                if entry.previous_hash != prev_hash {
+                    crate::metrics::LEDGER_CHAIN_VERIFY_FAILURE_TOTAL.inc();
+                    return Ok(VerifyChainOutput {
+                        chain_valid: false,
+                        entries_checked: entries_checked + 1,
+                        first_invalid_entry_id: Some(entry.entry_id),
+                        failure_reason: "chain_link_mismatch".to_string(),
+                    });
+                }
+                let recomputed = canonical_entry_hash(&CanonicalEntryHashInput {
+                    entry_id: entry.entry_id,
+                    entry_type: &entry.entry_type,
+                    agent_id: &entry.agent_id,
+                    content: &entry.content,
+                    content_type: &entry.content_type,
+                    source_id: &entry.source_id,
+                    correlation_id: entry.correlation_id.as_deref(),
+                    idempotency_key: entry.idempotency_key.as_deref(),
+                    input_hash: entry.input_hash.as_deref(),
+                    chain_position: entry.chain_position,
+                    written_ts_ms: entry.written_ts.timestamp_millis(),
+                    previous_hash: &entry.previous_hash,
                 });
+                if entry.entry_hash != recomputed {
+                    crate::metrics::LEDGER_CHAIN_VERIFY_FAILURE_TOTAL.inc();
+                    return Ok(VerifyChainOutput {
+                        chain_valid: false,
+                        entries_checked: entries_checked + 1,
+                        first_invalid_entry_id: Some(entry.entry_id),
+                        failure_reason: "entry_hash_mismatch".to_string(),
+                    });
+                }
+                prev_hash = entry.entry_hash.clone();
+                after_position = entry.chain_position;
+                entries_checked += 1;
+            }
+            if (batch.len() as i64) < BATCH_SIZE {
+                break;
             }
         }
         Ok(VerifyChainOutput {
             chain_valid: true,
-            entries_checked: filtered.len() as i64,
+            entries_checked,
             first_invalid_entry_id: None,
             failure_reason: String::new(),
         })
@@ -1222,6 +1235,19 @@ mod tests {
                 .cloned()
                 .unwrap_or_default())
         }
+        async fn get_entries_by_type_paged(
+            &self,
+            entry_type: &str,
+            after_position: i64,
+            limit: i64,
+        ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
+            let all = self.get_entries_by_type(entry_type).await?;
+            Ok(all
+                .into_iter()
+                .filter(|e| e.chain_position > after_position)
+                .take(limit as usize)
+                .collect())
+        }
         async fn find_idempotent(
             &self,
             _entry_type: &str,
@@ -1310,6 +1336,14 @@ mod tests {
         async fn get_entries_by_type(
             &self,
             _entry_type: &str,
+        ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
+            Err(self.error.clone())
+        }
+        async fn get_entries_by_type_paged(
+            &self,
+            _entry_type: &str,
+            _after_position: i64,
+            _limit: i64,
         ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
             Err(self.error.clone())
         }
@@ -1420,6 +1454,14 @@ mod tests {
             async fn get_entries_by_type(
                 &self,
                 _entry_type: &str,
+            ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
+                Ok(Vec::new())
+            }
+            async fn get_entries_by_type_paged(
+                &self,
+                _entry_type: &str,
+                _after_position: i64,
+                _limit: i64,
             ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
                 Ok(Vec::new())
             }

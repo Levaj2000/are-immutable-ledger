@@ -125,6 +125,12 @@ pub trait LedgerRepository: Send + Sync {
         &self,
         entry_type: &str,
     ) -> Result<Vec<LedgerEntryRecord>, RepositoryError>;
+    async fn get_entries_by_type_paged(
+        &self,
+        entry_type: &str,
+        after_position: i64,
+        limit: i64,
+    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError>;
     async fn find_idempotent(
         &self,
         entry_type: &str,
@@ -312,6 +318,30 @@ impl LedgerRepository for InMemoryLedgerRepository {
         for id in ids {
             if let Some(entry) = guard.entries.get(id) {
                 out.push(entry.clone());
+            }
+        }
+        Ok(out)
+    }
+
+    async fn get_entries_by_type_paged(
+        &self,
+        entry_type: &str,
+        after_position: i64,
+        limit: i64,
+    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
+        let guard = self.inner.read().await;
+        let Some(ids) = guard.ordered_by_type.get(entry_type) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for id in ids {
+            if let Some(entry) = guard.entries.get(id) {
+                if entry.chain_position > after_position {
+                    out.push(entry.clone());
+                    if out.len() >= limit as usize {
+                        break;
+                    }
+                }
             }
         }
         Ok(out)
