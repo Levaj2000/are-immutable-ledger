@@ -353,4 +353,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("GATEWAY_PORT", "18099"))
     host = os.environ.get("GATEWAY_HOST", "127.0.0.1")
     debug = os.environ.get("GATEWAY_DEBUG", "").lower() in {"1", "true", "yes"}
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, threaded=True)
