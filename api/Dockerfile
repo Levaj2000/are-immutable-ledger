@@ -7,7 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY sdks/python/ ./sdks/python/
 COPY api/gateway.py ./api/gateway.py
-
 USER 1001
 EXPOSE 28099
 ENV LEDGER_ENDPOINT=localhost:19292
