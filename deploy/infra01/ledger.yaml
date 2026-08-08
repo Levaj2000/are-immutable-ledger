@@ -112,8 +112,8 @@ spec:
             httpGet:
               path: /api/summary
               port: 28099
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            initialDelaySeconds: 15
+            periodSeconds: 30
           resources:
             requests:
               cpu: 50m
