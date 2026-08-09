@@ -204,9 +204,20 @@ def get_entries():
             except ValueError:
                 c.close()
                 return jsonify({"error": f"{key} must be Unix milliseconds"}), 400
-    entries = c.query(**kwargs)
+    page_size = request.args.get("page_size", "100")
+    try:
+        page_size = int(page_size)
+    except ValueError:
+        page_size = 100
+    page_token = request.args.get("page_token", "")
+    entries, next_token, total_count = c.query_page(
+        page_size=page_size, page_token=page_token, **kwargs)
     c.close()
-    return jsonify([entry_to_dict(e) for e in sorted(entries, key=lambda x: x.written_ts)])
+    return jsonify({
+        "entries": [entry_to_dict(e) for e in entries],
+        "next_page_token": next_token,
+        "total_count": total_count,
+    })
 
 
 @app.route("/api/summary")

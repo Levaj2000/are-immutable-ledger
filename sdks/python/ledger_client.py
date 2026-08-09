@@ -69,6 +69,23 @@ class LedgerClient:
             entries.extend(resp.entries)
         return entries
 
+    def query_page(self, *, agent_id="", entry_type="", source_id="",
+                   correlation_id="", from_ts=0, to_ts=0,
+                   page_size=100, page_token=""):
+        """Single-page query — returns (entries, next_page_token, total_count)."""
+        req = pb.QueryEntriesRequest(
+            agent_id=agent_id,
+            entry_type=entry_type,
+            source_id=source_id,
+            correlation_id=correlation_id,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            page_size=page_size,
+            page_token=page_token,
+        )
+        resp = self._call(self.stub.QueryEntries, req)
+        return list(resp.entries), resp.next_page_token, resp.total_count
+
     def verify_entry(self, entry_id):
         return self._call(self.stub.VerifyEntry, pb.VerifyEntryRequest(entry_id=entry_id))
 

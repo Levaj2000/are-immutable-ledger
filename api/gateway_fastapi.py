@@ -200,6 +200,7 @@ async def get_entries(
     from_ts: Optional[int] = Query(None),
     to_ts: Optional[int] = Query(None),
     page_size: int = Query(100),
+    page_token: str = Query(""),
 ):
     c = _get_client()
     kwargs = {}
@@ -209,10 +210,14 @@ async def get_entries(
     if correlation_id: kwargs["correlation_id"] = correlation_id
     if from_ts is not None: kwargs["from_ts"] = from_ts
     if to_ts is not None: kwargs["to_ts"] = to_ts
-    entries = await _run_sync(c.query, **kwargs)
+    entries, next_token, total_count = await _run_sync(
+        c.query_page, page_size=page_size, page_token=page_token, **kwargs)
     c.close()
-    sorted_entries = sorted(entries, key=lambda x: x.written_ts)
-    return [_entry_to_dict(e) for e in sorted_entries[:page_size]]
+    return {
+        "entries": [_entry_to_dict(e) for e in entries],
+        "next_page_token": next_token,
+        "total_count": total_count,
+    }
 
 
 @app.get("/api/summary")
