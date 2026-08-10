@@ -29,8 +29,8 @@ fi
 
 echo "Retention assessment: entries older than ${RETAIN_DAYS} days"
 
-psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -c "
-SET search_path TO ${SCHEMA};
+psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -v schema="$SCHEMA" -c "
+SET search_path TO :'schema';
 SELECT entry_type, count(*) AS candidate_entries
 FROM ledger_entries
 WHERE written_ts < NOW() - (:'retain_days' || ' days')::interval
@@ -38,8 +38,8 @@ GROUP BY entry_type
 ORDER BY candidate_entries DESC, entry_type;
 "
 
-psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -c "
-SET search_path TO ${SCHEMA};
+psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -v schema="$SCHEMA" -c "
+SET search_path TO :'schema';
 SELECT count(*) AS total_candidate_entries,
        COALESCE(sum(octet_length(content)), 0) AS candidate_content_bytes
 FROM ledger_entries

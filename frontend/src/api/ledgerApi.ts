@@ -65,9 +65,11 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   entries: async (params?: Record<string, string>) => {
+    const MAX_PAGES = 100
     const entries: LedgerEntry[] = []
     const seenTokens = new Set<string>()
     let pageToken = ''
+    let pages = 0
     do {
       const query = new URLSearchParams({ ...params, page_size: '1000' })
       if (pageToken) query.set('page_token', pageToken)
@@ -78,7 +80,8 @@ export const api = {
         throw new Error('API returned a repeated pagination token')
       }
       seenTokens.add(pageToken)
-    } while (pageToken)
+      pages++
+    } while (pageToken && pages < MAX_PAGES)
     return entries
   },
   summary: () => get<Summary>('/summary'),

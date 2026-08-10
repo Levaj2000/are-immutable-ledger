@@ -472,6 +472,14 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             },
         );
         let hash_valid = recomputed.as_deref() == Some(entry.entry_hash.as_str());
+        if recomputed.is_none() {
+            return Ok(VerifyEntryOutput {
+                entry_id,
+                hash_valid: false,
+                chain_link_valid: false,
+                failure_reason: "unsupported_hash_version".to_string(),
+            });
+        }
         let chain_link_valid = if entry.chain_position == 1 {
             entry.previous_hash == sha256_hex(self.config.genesis_hash_input.as_bytes())
         } else {
@@ -485,9 +493,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                 None => false,
             }
         };
-        let failure_reason = if recomputed.is_none() {
-            "unsupported_hash_version".to_string()
-        } else if hash_valid && chain_link_valid {
+        let failure_reason = if hash_valid && chain_link_valid {
             String::new()
         } else if !hash_valid {
             "entry_hash_mismatch".to_string()
@@ -664,23 +670,23 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         &self,
         input: WriteEntryInput,
     ) -> Result<ProofReceiptOutput, ServiceError> {
+        let entry_type = input.entry_type.clone();
+        let input_hash = input.input_hash.clone().unwrap_or_default();
+        let writer_signature = input.writer_signature.clone().unwrap_or_default();
+        let signer_key_reference = input.signer_key_reference.clone().unwrap_or_default();
+        let attestation_report = input.attestation_report.clone().unwrap_or_default();
         let write = self.write_entry(input).await?;
-        let persisted = self
-            .repo
-            .get_entry(write.entry_id)
-            .await
-            .map_err(map_repo)?;
         Ok(ProofReceiptOutput {
             entry_hash: write.entry_hash,
-            entry_type: persisted.entry_type,
+            entry_type,
             chain_position: write.chain_position,
             written_ts_ms: write.written_ts_ms,
             entry_id: write.entry_id,
-            input_hash: persisted.input_hash.unwrap_or_default(),
-            writer_signature: persisted.writer_signature.unwrap_or_default(),
-            signer_key_reference: persisted.signer_key_reference.unwrap_or_default(),
-            attestation_report: persisted.attestation_report.unwrap_or_default(),
-            hash_version: persisted.hash_version,
+            input_hash,
+            writer_signature,
+            signer_key_reference,
+            attestation_report,
+            hash_version: write.hash_version,
         })
     }
 
