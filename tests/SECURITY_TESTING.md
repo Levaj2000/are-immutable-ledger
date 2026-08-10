@@ -116,7 +116,8 @@ Receipts introduce new attack surface — a portable proof token that downstream
 | **Content swap** | Change what the receipt claims was validated | Hash verification FAILS — content is committed in hash | L17.04 |
 | **Issuer impersonation** | Change agent_id to claim a more trusted issuer | Hash verification FAILS — agent_id is committed in hash | L17.05 |
 | **Request rebinding** | Change correlation_id to bind receipt to different request | Hash verification FAILS — correlation_id is committed in hash | L17.06 |
-| **Idempotency abuse** | Reuse key with different content | ALREADY_EXISTS error — conflict detected | L17.08 |
+| **Proof-material swap (V3)** | Replace signature, key reference, or attestation bytes after write | Hash verification FAILS — the full V3 proof envelope is committed | Rust service + crypto tests |
+| **Idempotency abuse** | Reuse key with different content, metadata, or proof material | ALREADY_EXISTS error — conflict detected | L17.08 + Rust service tests |
 | **SQL injection** | Inject SQL via entry_type in IssueReceipt | Stored literally, no execution | L17.11 |
 | **Receipt flood** | Issue 100 receipts from 5 concurrent threads | All succeed, service healthy | L17.12 |
 
@@ -124,9 +125,10 @@ Receipts introduce new attack surface — a portable proof token that downstream
 
 | Limitation | Why | Mitigation |
 |---|---|---|
-| **Lying writer** | If AuthBridge writes "guardrail: clean" when it wasn't, the receipt faithfully proves the lie | Attestation is the writer's responsibility. Receipt proves the claim was made, not that it's true. |
+| **Lying writer** | If AuthBridge writes "guardrail: clean" when it wasn't, the receipt faithfully preserves the assertion | Verify issuer signature and attestation under an explicit policy; ledger integrity alone never establishes truth. |
 | **Replay within freshness window** | A receipt issued 100ms ago is indistinguishable from a new one | Downstream services must bind receipt to the specific request (via correlation_id match) |
 | **Receipt interception** | If an attacker reads the X-Proof-Receipt header, they know the hash | Hash is not a secret — knowing it only lets you verify, not forge. The entry_type scoping prevents cross-context use. |
+| **Legacy V2 proof fields** | V2 entries may contain signature/key-reference/attestation bytes that were not part of the canonical hash | Consumers requiring bound identity or runtime evidence must reject V2 and require V3. |
 
 ## Documented Gaps (Honest Assessment)
 
@@ -143,7 +145,7 @@ These are known limitations, not bugs. They represent design decisions appropria
 | **Advisory lock contention** | Concurrent writes to same chain serialize (~200/sec under contention) | Use distinct entry_types per source; parallel chains scale linearly |
 | **Single DB instance** | Connection pool (`deadpool-postgres`, 16 connections) enables parallel reads/writes | Read replicas for VerifyProof, horizontal partitioning for further scale |
 | **No receipt expiry** | Receipts verify indefinitely as long as the entry exists | Downstream services enforce freshness via written_ts check |
-| **Receipts not signed** | Receipts are hash references, not cryptographically signed tokens | The hash IS the proof — it references a chain-linked entry. Signing would add key management complexity without meaningfully stronger guarantees since the ledger is the verifier. |
+| **Receipt references not signed by the ledger** | Receipts are lookup references, not independently verifiable signed tokens | Authenticate the ledger endpoint and verify the returned V3 envelope. Use writer signatures and attestation only after validating them under a consumer-owned trust policy. Offline verification would require a separately designed signed checkpoint/export format. |
 
 ## Live Integration Evidence
 

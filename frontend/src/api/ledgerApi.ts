@@ -13,6 +13,17 @@ export interface LedgerEntry {
   previous_hash: string
   chain_position: number
   written_ts: number
+  input_hash: string
+  writer_signature: string
+  signer_key_reference: string
+  attestation_report: string
+  hash_version: string
+}
+
+export interface EntryPage {
+  entries: LedgerEntry[]
+  next_page_token: string
+  total_count: number
 }
 
 export interface ChainInfo {
@@ -53,9 +64,25 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
-  entries: (params?: Record<string, string>) => {
-    const qs = params ? '?' + new URLSearchParams(params).toString() : ''
-    return get<LedgerEntry[]>(`/entries${qs}`)
+  entries: async (params?: Record<string, string>) => {
+    const MAX_PAGES = 100
+    const entries: LedgerEntry[] = []
+    const seenTokens = new Set<string>()
+    let pageToken = ''
+    let pages = 0
+    do {
+      const query = new URLSearchParams({ ...params, page_size: '1000' })
+      if (pageToken) query.set('page_token', pageToken)
+      const page = await get<EntryPage>(`/entries?${query.toString()}`)
+      entries.push(...page.entries)
+      pageToken = page.next_page_token
+      if (pageToken && seenTokens.has(pageToken)) {
+        throw new Error('API returned a repeated pagination token')
+      }
+      seenTokens.add(pageToken)
+      pages++
+    } while (pageToken && pages < MAX_PAGES)
+    return entries
   },
   summary: () => get<Summary>('/summary'),
   chains: () => get<ChainInfo[]>('/chains'),

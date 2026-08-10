@@ -24,6 +24,47 @@ from ledger_client import LedgerClient
 
 RESULTS = []
 ENDPOINT = "localhost:19292"
+HASH_VERSION_V2 = "ARE_LEDGER_ENTRY_HASH_V2"
+HASH_VERSION_V3 = "ARE_LEDGER_ENTRY_HASH_V3"
+
+
+def independently_compute_entry_hash(entry):
+    """Rebuild the canonical envelope without calling the ledger verifier."""
+    version = getattr(entry, "hash_version", "") or HASH_VERSION_V2
+    fields = []
+    if version == HASH_VERSION_V3:
+        fields.append(("hash_version", version.encode()))
+    elif version != HASH_VERSION_V2:
+        raise AssertionError(f"Unsupported hash version: {version}")
+
+    fields.extend([
+        ("entry_id", entry.entry_id.encode()),
+        ("entry_type", entry.entry_type.encode()),
+        ("agent_id", entry.agent_id.encode()),
+        ("content", bytes(entry.content)),
+        ("content_type", entry.content_type.encode()),
+        ("source_id", entry.source_id.encode()),
+        ("correlation_id", entry.correlation_id.encode()),
+        ("idempotency_key", entry.idempotency_key.encode()),
+        ("input_hash", entry.input_hash.encode()),
+    ])
+    if version == HASH_VERSION_V3:
+        fields.extend([
+            ("writer_signature", bytes(entry.writer_signature)),
+            ("signer_key_reference", entry.signer_key_reference.encode()),
+            ("attestation_report", bytes(entry.attestation_report)),
+        ])
+    fields.extend([
+        ("chain_position", str(entry.chain_position).encode()),
+        ("written_ts_ms", str(entry.written_ts).encode()),
+        ("previous_hash", entry.previous_hash.encode()),
+    ])
+
+    canonical = version.encode() + b"\n" + b"".join(
+        name.encode() + b":" + str(len(value)).encode() + b":" + value + b"\n"
+        for name, value in fields
+    )
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def test(test_id, description):
@@ -120,25 +161,7 @@ def test_l1_06(c):
     r1 = c.write(etype, "test-agent-l1", content, source_id="evidence-runner",
                  correlation_id="corr-l1-06", idempotency_key=idem_key)
     e1 = c.get_entry(r1.entry_id)
-    fields = [
-        ("entry_id", e1.entry_id.encode()),
-        ("entry_type", e1.entry_type.encode()),
-        ("agent_id", e1.agent_id.encode()),
-        ("content", bytes(e1.content)),
-        ("content_type", e1.content_type.encode()),
-        ("source_id", e1.source_id.encode()),
-        ("correlation_id", e1.correlation_id.encode()),
-        ("idempotency_key", e1.idempotency_key.encode()),
-        ("input_hash", (e1.input_hash if hasattr(e1, 'input_hash') and e1.input_hash else "").encode()),
-        ("chain_position", str(e1.chain_position).encode()),
-        ("written_ts_ms", str(e1.written_ts).encode()),
-        ("previous_hash", e1.previous_hash.encode()),
-    ]
-    canonical = b"ARE_LEDGER_ENTRY_HASH_V2\n" + b"".join(
-        name.encode() + b":" + str(len(value)).encode() + b":" + value + b"\n"
-        for name, value in fields
-    )
-    computed = hashlib.sha256(canonical).hexdigest()
+    computed = independently_compute_entry_hash(e1)
     assert e1.entry_hash == computed, f"Hash mismatch: {e1.entry_hash} != {computed}"
 
 @test("L1.07", "Chain linkage: previous_hash is included in entry_hash")

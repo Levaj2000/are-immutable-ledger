@@ -76,6 +76,7 @@ def _entry_to_dict(e):
         "writer_signature": e.writer_signature.hex() if e.writer_signature else "",
         "signer_key_reference": e.signer_key_reference if hasattr(e, "signer_key_reference") else "",
         "attestation_report": e.attestation_report.hex() if e.attestation_report else "",
+        "hash_version": e.hash_version,
     }
 
 
@@ -99,6 +100,9 @@ async def write_entry(request: Request):
         correlation_id=body.get("correlation_id", ""),
         idempotency_key=body.get("idempotency_key", ""),
         input_hash=body.get("input_hash", ""),
+        writer_signature=bytes.fromhex(body["writer_signature"]) if body.get("writer_signature") else b"",
+        signer_key_reference=body.get("signer_key_reference", ""),
+        attestation_report=bytes.fromhex(body["attestation_report"]) if body.get("attestation_report") else b"",
     )
     c.close()
     return {
@@ -106,6 +110,7 @@ async def write_entry(request: Request):
         "entry_hash": resp.entry_hash,
         "chain_position": resp.chain_position,
         "written_ts": resp.written_ts,
+        "hash_version": resp.hash_version,
     }
 
 
@@ -138,6 +143,7 @@ async def issue_receipt(request: Request):
         "writer_signature": receipt.writer_signature.hex() if receipt.writer_signature else "",
         "signer_key_reference": receipt.signer_key_reference,
         "attestation_report": receipt.attestation_report.hex() if receipt.attestation_report else "",
+        "hash_version": receipt.hash_version,
     }
 
 
@@ -162,6 +168,7 @@ async def verify_proof(hash: str = Query(""), type: str = Query("")):
         "writer_signature": v.writer_signature.hex() if v.writer_signature else "",
         "signer_key_reference": v.signer_key_reference,
         "attestation_report": v.attestation_report.hex() if v.attestation_report else "",
+        "hash_version": v.hash_version,
     }
 
 

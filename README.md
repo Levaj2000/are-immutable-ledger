@@ -2,17 +2,17 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-Proof chain and runtime trust infrastructure for agentic systems. Hash-chained entries prove what happened. Portable proof receipts prove a check ran so downstream services skip redundant guardrails. Cross-system verification correlates events across independent platforms without shared identity.
+Tamper-evident evidence infrastructure for agentic systems. Hash-chained entries show whether stored assertions were changed after acceptance. Portable proof receipts let downstream services retrieve and validate those assertions under an explicit trust policy. Cross-system queries correlate independently supplied events without pretending that correlation proves identity, causality, or truth.
 
-> **Guardrails get duplicated across enforcement points — AuthBridge runs PII scan, MCP Gateway runs it again, AI Gateway runs it a third time. The ledger solves this: centralized proof, decentralized enforcement, portable receipts between enforcement points.**
+> **A receipt is evidence that a writer submitted a particular assertion. Reusing that evidence is safe only after the consumer validates the issuer, signature, payload binding, freshness, policy/check version, and local authorization requirements.**
 
 ## What It Does
 
 The ledger answers four questions for any agentic system:
 
-1. **What happened?** Append-only event storage with per-source hash chains.
-2. **Can you prove it?** SHA-256 hash chaining with cryptographic chain verification.
-3. **Did this check already run?** Proof receipts travel with requests — downstream verifies the receipt instead of re-running the guardrail.
+1. **What was asserted?** Append-only event storage with per-type hash chains.
+2. **Was the stored assertion changed?** SHA-256 hash chaining with version-aware verification.
+3. **Is there reusable evidence for this check?** Proof receipts retrieve a bound assertion; downstream policy decides whether it is sufficient or the check must run again.
 4. **Can you correlate across systems?** Query by agent ID, correlation ID, source, time range, or entry type across independent writers.
 
 ## The Universal Contract
@@ -40,29 +40,29 @@ No shared identity system required. No event format standardization required. Ea
 
 - **Append-only** - database constraints enforce no UPDATE/DELETE on ledger entries. Startup verification confirms permissions.
 - **Per-type hash chains** - each `entry_type` forms its own SHA-256 chain. Independent verification per source system.
-- **V2 canonical proof envelope** - hashes commit to entry ID, metadata, content, idempotency key, chain position, timestamp, and previous hash using length-delimited fields.
+- **Versioned canonical proof envelope** - V3 hashes commit to entry ID, metadata, content, idempotency key, input hash, optional signature/key-reference/attestation bytes, chain position, timestamp, and previous hash using length-delimited fields. Historical V2 entries remain verifiable with their original rules.
 - **Concurrent-safe** - connection pool (`deadpool-postgres`, configurable max size) with per-`entry_type` PostgreSQL advisory locks. Writes to different chains run in parallel. Integrity violations trigger exponential backoff retry (up to 10 attempts, configurable) with auto-recovery after 60 seconds.
 - **Idempotent** - optional idempotency keys prevent duplicate entries on retry; reusing a key with different content or metadata returns a conflict.
 - **Cross-system queries** - `QueryEntries` filters by agent_id, correlation_id, source_id, entry_type prefix, and time range. One query returns entries from all sources for the same agent or request.
 - **Hardened admin surface** - `/shutdownz` is disabled unless `ARE_LEDGER_SHUTDOWN_TOKEN` is set and requires a bearer token when enabled. gRPC bearer-token auth can be enabled with `ARE_LEDGER_API_TOKEN`.
-- **Proof receipts** - `IssueReceipt` writes an entry and returns a compact `ProofReceipt` (hash, type, position, timestamp). `VerifyProof` validates a receipt by hash without knowing the entry ID. Receipts travel as HTTP headers so downstream services verify a check ran without re-executing it.
-- **Writer signatures** - optional `writer_signature` (opaque bytes) + `signer_key_reference` (key ID, SPIFFE SVID, DID). The ledger stores but doesn't verify — downstream checks the signature against the writer's public key. Proves WHO wrote the entry.
-- **Attestation reports** - optional `attestation_report` (opaque bytes — SGX quote, SEV-SNP report, RATS EAT token). Proves WHERE the entry was written (verified runtime). Three layers of proof, all stored, none interpreted by the ledger.
+- **Proof receipts** - `IssueReceipt` writes an entry and returns its persisted proof material. `VerifyProof` validates the stored canonical hash by hash and type without knowing the entry ID. It does not verify that the asserted check actually ran or was correct.
+- **Writer evidence** - optional `writer_signature` (opaque bytes) + `signer_key_reference` (key ID, SPIFFE SVID, DID). V3 binds both into the entry hash, but the ledger does not define the signed payload, resolve the key, validate its trust chain, or verify the signature. Consumers must do that work.
+- **Attestation evidence** - optional `attestation_report` (opaque bytes such as an SGX quote, SEV-SNP report, or RATS EAT token). V3 binds the bytes into the entry hash; consumers still validate format, endorsement chain, measurements, nonce/freshness, and policy.
 
 ## Three Layers of Proof
 
 ```
-Layer 1: entry_hash            → content wasn't modified (ledger verifies)
-Layer 2: writer_signature      → who wrote it (verifier checks against public key)
+Layer 1: entry_hash            → stored envelope was not modified (ledger verifies)
+Layer 2: writer_signature      → writer-supplied identity evidence (consumer verifies)
          signer_key_reference  → which key to use
-Layer 3: attestation_report    → where it was written (verifier checks against hardware root)
+Layer 3: attestation_report    → runtime evidence (consumer verifies against its trust policy)
 ```
 
 All optional. All backward compatible. All identity-neutral — the ledger stores opaque bytes for Ed25519, ECDSA, SPIFFE SVIDs, SGX quotes, or any format the writer uses.
 
 ## Proof Receipts
 
-Receipts solve the redundant-check problem in multi-hop agentic architectures. When AuthBridge runs a guardrail, it issues a receipt. The MCP Gateway verifies the receipt and skips the same guardrail. The MCP Server does the same.
+Receipts can reduce redundant checks in multi-hop agentic architectures, but only when each consumer's policy accepts the evidence. When AuthBridge reports a guardrail result, it issues a receipt. The MCP Gateway validates the ledger proof plus the issuer evidence, current payload binding, freshness, check/policy version, audience, and purpose. It skips the check only if all required validations succeed.
 
 ```
 AuthBridge runs guardrail
@@ -75,10 +75,10 @@ MCP Gateway receives request
   → Reads X-Proof-Receipt
   → VerifyProof(entry_hash="abc123...", entry_type="guardrail.pii_scan")
   → Response: {valid: true, agent_id: "authbridge", written_ts: ...}
-  → Skips re-running the guardrail
+  → Applies local receipt policy; skips only if every required check passes
 ```
 
-Receipts are NOT credentials — they prove a check ran, they don't grant authority. The V2 hash commits to all entry fields (content, agent_id, correlation_id, entry_id, chain_position, timestamp, previous_hash). Changing any field breaks verification.
+Receipts are not credentials and do not grant authority. They prove that the ledger accepted and still contains a particular writer assertion under the stored hash version. They do not independently prove that a check ran, that its implementation was sound, that its result is current, or that the writer was honest. V3 commits to the full stored proof envelope; consumers must inspect `hash_version` and may reject legacy V2 receipts when signature or attestation binding is required.
 
 ## Performance
 
@@ -99,7 +99,7 @@ Raw gRPC numbers (no REST overhead): WriteEntry p50=1.7ms p99=4.3ms ~520/sec, Ve
 |---|---|---|
 | **Advisory lock contention** | Writes to the same `entry_type` serialize via SHA-256-derived advisory locks. Single-chain: 88/s at 100 req/s with 0 errors. | Use distinct `entry_type` per source. Parallel chains scale linearly. Split hot chains by tool or instance. |
 | **Chain verification on long chains** | VerifyChain walks chains in batches of 500 entries (bounded memory). Verification checkpoints not yet implemented. | Add checkpoints for long-chain skip-ahead. Streaming already prevents OOM. |
-| **Storage growth** | Each entry stores full content bytes (up to 1 MiB). High-volume systems generate significant storage. | Content compression. Content-addressed storage (store hash, external blob). TTL-based archival. |
+| **Storage growth** | Each entry stores full content bytes (up to 1 MiB). High-volume systems generate significant storage. | Content compression or content-addressed storage. Raw TTL deletion is unsupported because it breaks retained chain history; see `docs/retention-and-archival.md` for checkpointed archival requirements. |
 | **gRPC message size** | QueryEntries can return large result sets. Default 4MB gRPC limit hit at ~3K entries. | Pagination (already implemented). Client must page through results. |
 
 ## Quick Start
@@ -115,15 +115,17 @@ make demo      # Full cross-system demo with OpenShell + Kagenti
 
 The repository keeps the proof surface close to the code:
 
+- `docs/oss-boundary-and-hardening-status.md` defines what this ledger can and cannot establish and lists the remaining enterprise gaps.
+- `docs/retention-and-archival.md` defines why raw TTL deletion is unsafe and what a future archival protocol must preserve.
 - `tests/EVIDENCE_MATRIX.md` summarizes automated, live, and not-yet-automated coverage.
 - `tests/evidence-results.json` records the latest evidence runner output.
 - `tests/SECURITY_TESTING.md` documents red-team and hardening checks.
 - `contracts/fleet-ecosystem-integration-contract.md` defines the proof-only boundary
   and canonical API mapping for deepfield-fleet, governed-cognitive-loop, and
   fleet-llm-d integration.
-- `proof-explorer/proof.py verify --all` independently verifies stored chains through the public API.
+- `proof-explorer/proof.py verify --all` requests stored-chain verification through the public API; `tests/run_evidence.py` also reconstructs a canonical entry hash independently.
 
-Current checked-in evidence shows `146/146` automated checks GREEN. The matrix still keeps design-level/manual items as YELLOW until those checks are automated in `tests/run_evidence.py`.
+The checked-in evidence snapshot records `146/146` automated checks GREEN for the commit and environment named in that artifact. It is historical evidence, not a guarantee that the current checkout or a new deployment is green. Re-run the applicable commands below and retain the resulting commit, configuration, and environment metadata for release evidence. The matrix keeps design-level/manual items YELLOW until they are automated in `tests/run_evidence.py`.
 
 Useful local verification commands:
 
@@ -153,7 +155,7 @@ Connection pool and chain recovery are configurable:
 | `ARE_LEDGER_CHAIN_MAX_RETRIES` | 10 | Retry attempts per write before chain halt |
 | `ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS` | 60 | Auto-recovery timeout for halted chains |
 
-Hash compatibility note: this pre-release standalone ledger uses the V2 canonical proof envelope as its initial public contract. No production data has been written with the earlier experimental hash shape; if you have local demo data from before V2, reload it.
+Hash compatibility note: migration 006 labels existing rows as V2 and new rows as V3. Verification dispatches by each row's `hash_version`; unknown versions fail closed. V2 did not bind `writer_signature`, `signer_key_reference`, or `attestation_report`, so consumers requiring those properties must reject V2 receipts or re-issue evidence under V3. Do not relabel or re-hash historical rows in place.
 
 ## Security Notes
 

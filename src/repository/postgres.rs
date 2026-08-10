@@ -8,9 +8,12 @@ use uuid::Uuid;
 
 use super::{
     ledger_written_payload, ChainTip, EntryQuery, EntryWriteInput, LedgerEntryRecord,
-    LedgerRepository, OutboxRecord, OutboxStatus, QueryResult, RepositoryError, WriteResult,
+    LedgerRepository, LedgerWrittenPayloadInput, OutboxRecord, OutboxStatus, QueryResult,
+    RepositoryError, WriteResult,
 };
-use crate::crypto::{advisory_lock_key, canonical_entry_hash, CanonicalEntryHashInput};
+use crate::crypto::{
+    advisory_lock_key, canonical_entry_hash, CanonicalEntryHashInput, ENTRY_HASH_VERSION,
+};
 
 pub struct PostgresLedgerRepository {
     pool: Pool,
@@ -35,6 +38,7 @@ impl PostgresLedgerRepository {
             writer_signature: row.try_get("writer_signature").ok().flatten(),
             signer_key_reference: row.try_get("signer_key_reference").ok().flatten(),
             attestation_report: row.try_get("attestation_report").ok().flatten(),
+            hash_version: row.get("hash_version"),
             entry_hash: row.get("entry_hash"),
             previous_hash: row.get("previous_hash"),
             chain_position: row.get("chain_position"),
@@ -126,19 +130,23 @@ impl LedgerRepository for PostgresLedgerRepository {
             correlation_id: input.correlation_id.as_deref(),
             idempotency_key: input.idempotency_key.as_deref(),
             input_hash: input.input_hash.as_deref(),
+            writer_signature: input.writer_signature.as_deref(),
+            signer_key_reference: input.signer_key_reference.as_deref(),
+            attestation_report: input.attestation_report.as_deref(),
             chain_position: next_position,
             written_ts_ms: written_ts.timestamp_millis(),
             previous_hash: &input.previous_hash,
         });
-        let outbox_payload = ledger_written_payload(
-            &entry_id,
-            &input.entry_type,
-            &input.agent_id,
-            &input.source_id,
-            &entry_hash,
-            input.correlation_id.as_deref(),
-            written_ts.timestamp_millis(),
-        );
+        let outbox_payload = ledger_written_payload(LedgerWrittenPayloadInput {
+            entry_id: &entry_id,
+            entry_type: &input.entry_type,
+            agent_id: &input.agent_id,
+            source_id: &input.source_id,
+            entry_hash: &entry_hash,
+            hash_version: ENTRY_HASH_VERSION,
+            correlation_id: input.correlation_id.as_deref(),
+            written_ts_ms: written_ts.timestamp_millis(),
+        });
         let payload_json: Json<Value> = Json(
             serde_json::from_str::<Value>(&outbox_payload)
                 .map_err(|_| RepositoryError::Unavailable)?,
@@ -148,8 +156,8 @@ impl LedgerRepository for PostgresLedgerRepository {
             .execute(
                 "INSERT INTO are_ledger.ledger_entries (
                     entry_id, entry_type, agent_id, content, content_type, source_id,
-                    correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+                    correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
                 &[
                     &entry_id,
                     &input.entry_type,
@@ -163,6 +171,7 @@ impl LedgerRepository for PostgresLedgerRepository {
                     &input.writer_signature,
                     &input.signer_key_reference,
                     &input.attestation_report,
+                    &ENTRY_HASH_VERSION,
                     &entry_hash,
                     &input.previous_hash,
                     &next_position,
@@ -214,6 +223,7 @@ impl LedgerRepository for PostgresLedgerRepository {
             writer_signature: input.writer_signature,
             signer_key_reference: input.signer_key_reference,
             attestation_report: input.attestation_report,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: entry_hash.clone(),
             previous_hash: input.previous_hash,
             chain_position: next_position,
@@ -239,7 +249,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries WHERE entry_id = $1",
                 &[&entry_id],
             )
@@ -286,7 +296,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let rows = client
             .query(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE ($1::TEXT IS NULL OR entry_type LIKE ($1::TEXT || '%'))
                    AND ($2::TEXT IS NULL OR agent_id = $2)
@@ -323,7 +333,7 @@ impl LedgerRepository for PostgresLedgerRepository {
             .map_err(|_| RepositoryError::Unavailable)?;
         let row = client
             .query_opt(
-                "SELECT entry_id, entry_hash, chain_position, written_ts
+                "SELECT entry_id, entry_hash, hash_version, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE entry_type = $1
                  ORDER BY chain_position DESC
@@ -336,6 +346,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         Ok(ChainTip {
             entry_id: row.get("entry_id"),
             hash: row.get("entry_hash"),
+            hash_version: row.get("hash_version"),
             position: row.get("chain_position"),
             written_ts: row.get("written_ts"),
         })
@@ -353,7 +364,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let rows = client
             .query(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE entry_type = $1
                  ORDER BY chain_position",
@@ -378,7 +389,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let rows = client
             .query(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE entry_type = $1 AND chain_position > $2
                  ORDER BY chain_position
@@ -403,7 +414,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE entry_type = $1 AND entry_hash = $2",
                 &[&entry_type, &entry_hash],
@@ -427,7 +438,7 @@ impl LedgerRepository for PostgresLedgerRepository {
         let row = client
             .query_opt(
                 "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, entry_hash, previous_hash, chain_position, written_ts
+                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
                  FROM are_ledger.ledger_entries
                  WHERE entry_type = $1 AND idempotency_key = $2",
                 &[&entry_type, &idempotency_key],

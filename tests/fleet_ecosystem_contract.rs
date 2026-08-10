@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use are_immutable_ledger::config::AppConfig;
-use are_immutable_ledger::crypto::sha256_hex;
+use are_immutable_ledger::crypto::{sha256_hex, ENTRY_HASH_VERSION};
 use are_immutable_ledger::repository::InMemoryLedgerRepository;
 use are_immutable_ledger::service::{
     ImmutableLedgerService, NoopEventPublisher, QueryEntriesInput, WriteEntryInput,
@@ -120,6 +120,8 @@ async fn core_four_entries_are_correlated_receipted_and_chain_verifiable() {
         assert!(proof.valid, "{} receipt must be valid", receipt.entry_type);
         assert_eq!(proof.correlation_id, correlation_id);
         assert_eq!(proof.input_hash, receipt.input_hash);
+        assert_eq!(receipt.hash_version, ENTRY_HASH_VERSION);
+        assert_eq!(proof.hash_version, ENTRY_HASH_VERSION);
     }
 
     let (timeline, next_page, total_count) = service

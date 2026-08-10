@@ -28,6 +28,7 @@ export function DetailSidebar({ entry }: { entry: LedgerEntry }) {
 
       <Field label="Entry Hash" value={entry.entry_hash} mono />
       <Field label="Previous Hash" value={entry.previous_hash} mono />
+      <Field label="Hash Version" value={entry.hash_version} mono />
 
       {entry.writer_signature && (
         <>

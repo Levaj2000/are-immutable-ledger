@@ -9,7 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::crypto::{canonical_entry_hash, sha256_hex, CanonicalEntryHashInput};
+use crate::crypto::{canonical_entry_hash_for_version, sha256_hex, CanonicalEntryHashInput};
 use crate::repository::{
     EntryQuery, EntryWriteInput, LedgerEntryRecord, LedgerRepository, OutboxRecord, RepositoryError,
 };
@@ -35,6 +35,7 @@ pub struct WriteEntryOutput {
     pub entry_hash: String,
     pub chain_position: i64,
     pub written_ts_ms: i64,
+    pub hash_version: String,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +65,7 @@ pub struct ProofReceiptOutput {
     pub writer_signature: Vec<u8>,
     pub signer_key_reference: String,
     pub attestation_report: Vec<u8>,
+    pub hash_version: String,
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +83,7 @@ pub struct VerifyProofOutput {
     pub writer_signature: Vec<u8>,
     pub signer_key_reference: String,
     pub attestation_report: Vec<u8>,
+    pub hash_version: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -305,6 +308,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                     entry_hash: existing.entry_hash,
                     chain_position: existing.chain_position,
                     written_ts_ms: existing.written_ts.timestamp_millis(),
+                    hash_version: existing.hash_version,
                 });
             }
         }
@@ -346,6 +350,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                         entry_hash: result.entry.entry_hash,
                         chain_position: result.entry.chain_position,
                         written_ts_ms: result.entry.written_ts.timestamp_millis(),
+                        hash_version: result.entry.hash_version,
                     });
                 }
                 Err(RepositoryError::ChainIntegrityViolation) if attempt + 1 < max_retries => {
@@ -367,6 +372,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                                 entry_hash: existing.entry_hash,
                                 chain_position: existing.chain_position,
                                 written_ts_ms: existing.written_ts.timestamp_millis(),
+                                hash_version: existing.hash_version,
                             });
                         }
                     }
@@ -445,21 +451,35 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
 
     pub async fn verify_entry(&self, entry_id: Uuid) -> Result<VerifyEntryOutput, ServiceError> {
         let entry = self.repo.get_entry(entry_id).await.map_err(map_repo)?;
-        let recomputed = canonical_entry_hash(&CanonicalEntryHashInput {
-            entry_id: entry.entry_id,
-            entry_type: &entry.entry_type,
-            agent_id: &entry.agent_id,
-            content: &entry.content,
-            content_type: &entry.content_type,
-            source_id: &entry.source_id,
-            correlation_id: entry.correlation_id.as_deref(),
-            idempotency_key: entry.idempotency_key.as_deref(),
-            input_hash: entry.input_hash.as_deref(),
-            chain_position: entry.chain_position,
-            written_ts_ms: entry.written_ts.timestamp_millis(),
-            previous_hash: &entry.previous_hash,
-        });
-        let hash_valid = recomputed == entry.entry_hash;
+        let recomputed = canonical_entry_hash_for_version(
+            &entry.hash_version,
+            &CanonicalEntryHashInput {
+                entry_id: entry.entry_id,
+                entry_type: &entry.entry_type,
+                agent_id: &entry.agent_id,
+                content: &entry.content,
+                content_type: &entry.content_type,
+                source_id: &entry.source_id,
+                correlation_id: entry.correlation_id.as_deref(),
+                idempotency_key: entry.idempotency_key.as_deref(),
+                input_hash: entry.input_hash.as_deref(),
+                writer_signature: entry.writer_signature.as_deref(),
+                signer_key_reference: entry.signer_key_reference.as_deref(),
+                attestation_report: entry.attestation_report.as_deref(),
+                chain_position: entry.chain_position,
+                written_ts_ms: entry.written_ts.timestamp_millis(),
+                previous_hash: &entry.previous_hash,
+            },
+        );
+        let hash_valid = recomputed.as_deref() == Some(entry.entry_hash.as_str());
+        if recomputed.is_none() {
+            return Ok(VerifyEntryOutput {
+                entry_id,
+                hash_valid: false,
+                chain_link_valid: false,
+                failure_reason: "unsupported_hash_version".to_string(),
+            });
+        }
         let chain_link_valid = if entry.chain_position == 1 {
             entry.previous_hash == sha256_hex(self.config.genesis_hash_input.as_bytes())
         } else {
@@ -499,6 +519,11 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
 
         let start_position = if let Some(id) = start_entry_id {
             let entry = self.repo.get_entry(id).await.map_err(map_repo)?;
+            if entry.entry_type != entry_type {
+                return Err(ServiceError::InvalidArgument(
+                    "start_entry_id does not belong to entry_type".to_string(),
+                ));
+            }
             entry.chain_position
         } else {
             1
@@ -506,10 +531,21 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
 
         let end_position = if let Some(id) = end_entry_id {
             let entry = self.repo.get_entry(id).await.map_err(map_repo)?;
+            if entry.entry_type != entry_type {
+                return Err(ServiceError::InvalidArgument(
+                    "end_entry_id does not belong to entry_type".to_string(),
+                ));
+            }
             entry.chain_position
         } else {
             i64::MAX
         };
+
+        if start_position > end_position {
+            return Err(ServiceError::InvalidArgument(
+                "start_entry_id must not follow end_entry_id".to_string(),
+            ));
+        }
 
         let genesis = sha256_hex(self.config.genesis_hash_input.as_bytes());
         let mut prev_hash = if start_position == 1 {
@@ -563,27 +599,37 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                         failure_reason: "chain_link_mismatch".to_string(),
                     });
                 }
-                let recomputed = canonical_entry_hash(&CanonicalEntryHashInput {
-                    entry_id: entry.entry_id,
-                    entry_type: &entry.entry_type,
-                    agent_id: &entry.agent_id,
-                    content: &entry.content,
-                    content_type: &entry.content_type,
-                    source_id: &entry.source_id,
-                    correlation_id: entry.correlation_id.as_deref(),
-                    idempotency_key: entry.idempotency_key.as_deref(),
-                    input_hash: entry.input_hash.as_deref(),
-                    chain_position: entry.chain_position,
-                    written_ts_ms: entry.written_ts.timestamp_millis(),
-                    previous_hash: &entry.previous_hash,
-                });
-                if entry.entry_hash != recomputed {
+                let recomputed = canonical_entry_hash_for_version(
+                    &entry.hash_version,
+                    &CanonicalEntryHashInput {
+                        entry_id: entry.entry_id,
+                        entry_type: &entry.entry_type,
+                        agent_id: &entry.agent_id,
+                        content: &entry.content,
+                        content_type: &entry.content_type,
+                        source_id: &entry.source_id,
+                        correlation_id: entry.correlation_id.as_deref(),
+                        idempotency_key: entry.idempotency_key.as_deref(),
+                        input_hash: entry.input_hash.as_deref(),
+                        writer_signature: entry.writer_signature.as_deref(),
+                        signer_key_reference: entry.signer_key_reference.as_deref(),
+                        attestation_report: entry.attestation_report.as_deref(),
+                        chain_position: entry.chain_position,
+                        written_ts_ms: entry.written_ts.timestamp_millis(),
+                        previous_hash: &entry.previous_hash,
+                    },
+                );
+                if recomputed.as_deref() != Some(entry.entry_hash.as_str()) {
                     crate::metrics::LEDGER_CHAIN_VERIFY_FAILURE_TOTAL.inc();
                     return Ok(VerifyChainOutput {
                         chain_valid: false,
                         entries_checked: entries_checked + 1,
                         first_invalid_entry_id: Some(entry.entry_id),
-                        failure_reason: "entry_hash_mismatch".to_string(),
+                        failure_reason: if recomputed.is_none() {
+                            "unsupported_hash_version".to_string()
+                        } else {
+                            "entry_hash_mismatch".to_string()
+                        },
                     });
                 }
                 prev_hash = entry.entry_hash.clone();
@@ -640,6 +686,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             writer_signature,
             signer_key_reference,
             attestation_report,
+            hash_version: write.hash_version,
         })
     }
 
@@ -655,22 +702,28 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             .await
             .map_err(map_repo)?;
 
-        let computed = canonical_entry_hash(&CanonicalEntryHashInput {
-            entry_id: entry.entry_id,
-            entry_type: &entry.entry_type,
-            agent_id: &entry.agent_id,
-            content: &entry.content,
-            content_type: &entry.content_type,
-            source_id: &entry.source_id,
-            correlation_id: entry.correlation_id.as_deref(),
-            idempotency_key: entry.idempotency_key.as_deref(),
-            input_hash: entry.input_hash.as_deref(),
-            chain_position: entry.chain_position,
-            written_ts_ms: entry.written_ts.timestamp_millis(),
-            previous_hash: &entry.previous_hash,
-        });
+        let computed = canonical_entry_hash_for_version(
+            &entry.hash_version,
+            &CanonicalEntryHashInput {
+                entry_id: entry.entry_id,
+                entry_type: &entry.entry_type,
+                agent_id: &entry.agent_id,
+                content: &entry.content,
+                content_type: &entry.content_type,
+                source_id: &entry.source_id,
+                correlation_id: entry.correlation_id.as_deref(),
+                idempotency_key: entry.idempotency_key.as_deref(),
+                input_hash: entry.input_hash.as_deref(),
+                writer_signature: entry.writer_signature.as_deref(),
+                signer_key_reference: entry.signer_key_reference.as_deref(),
+                attestation_report: entry.attestation_report.as_deref(),
+                chain_position: entry.chain_position,
+                written_ts_ms: entry.written_ts.timestamp_millis(),
+                previous_hash: &entry.previous_hash,
+            },
+        );
 
-        let hash_valid = computed == entry.entry_hash;
+        let hash_valid = computed.as_deref() == Some(entry.entry_hash.as_str());
         crate::metrics::VERIFY_DURATION.observe(start.elapsed().as_secs_f64());
         Ok(VerifyProofOutput {
             valid: hash_valid,
@@ -678,7 +731,9 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             agent_id: entry.agent_id,
             written_ts_ms: entry.written_ts.timestamp_millis(),
             chain_position: entry.chain_position,
-            failure_reason: if hash_valid {
+            failure_reason: if computed.is_none() {
+                "unsupported_hash_version".to_string()
+            } else if hash_valid {
                 String::new()
             } else {
                 "entry_hash_mismatch".to_string()
@@ -690,6 +745,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
             writer_signature: entry.writer_signature.unwrap_or_default(),
             signer_key_reference: entry.signer_key_reference.unwrap_or_default(),
             attestation_report: entry.attestation_report.unwrap_or_default(),
+            hash_version: entry.hash_version,
         })
     }
 }
@@ -728,11 +784,16 @@ fn idempotent_request_matches(existing: &LedgerEntryRecord, input: &WriteEntryIn
         && existing.content_type == input.content_type
         && existing.source_id == input.source_id
         && existing.correlation_id == input.correlation_id
+        && existing.input_hash == input.input_hash
+        && existing.writer_signature == input.writer_signature
+        && existing.signer_key_reference == input.signer_key_reference
+        && existing.attestation_report == input.attestation_report
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::{canonical_entry_hash, ENTRY_HASH_VERSION};
     use crate::metrics;
     use crate::repository::InMemoryLedgerRepository;
     use crate::repository::{
@@ -957,6 +1018,66 @@ mod tests {
             .await
             .expect_err("conflicting retry should fail");
         assert!(matches!(err, ServiceError::AlreadyExists(_)));
+    }
+
+    #[tokio::test]
+    async fn idempotency_rejects_changed_proof_material() {
+        let svc = service();
+        let base = WriteEntryInput {
+            entry_type: "governance.decision".to_string(),
+            agent_id: "strategy-agent".to_string(),
+            content: br#"{"decision":"approve"}"#.to_vec(),
+            content_type: "application/json".to_string(),
+            source_id: "strategy".to_string(),
+            input_hash: Some("sha256:input-a".to_string()),
+            writer_signature: Some(vec![1, 2, 3]),
+            signer_key_reference: Some("kms://signers/alice".to_string()),
+            attestation_report: Some(vec![4, 5, 6]),
+            correlation_id: Some("strategy-42".to_string()),
+            idempotency_key: Some("decision-42".to_string()),
+        };
+
+        let first = svc.issue_receipt(base.clone()).await.expect("first write");
+        let identical_retry = svc
+            .issue_receipt(base.clone())
+            .await
+            .expect("identical retry");
+        assert_eq!(identical_retry.entry_id, first.entry_id);
+        assert_eq!(identical_retry.entry_hash, first.entry_hash);
+        assert_eq!(identical_retry.input_hash, first.input_hash);
+        assert_eq!(identical_retry.writer_signature, first.writer_signature);
+        assert_eq!(
+            identical_retry.signer_key_reference,
+            first.signer_key_reference
+        );
+        assert_eq!(identical_retry.attestation_report, first.attestation_report);
+        assert_eq!(identical_retry.hash_version, first.hash_version);
+
+        let mut changed_inputs = Vec::new();
+
+        let mut changed = base.clone();
+        changed.input_hash = Some("sha256:input-b".to_string());
+        changed_inputs.push(changed);
+
+        let mut changed = base.clone();
+        changed.writer_signature = Some(vec![9, 9, 9]);
+        changed_inputs.push(changed);
+
+        let mut changed = base.clone();
+        changed.signer_key_reference = Some("kms://signers/bob".to_string());
+        changed_inputs.push(changed);
+
+        let mut changed = base;
+        changed.attestation_report = Some(vec![8, 8, 8]);
+        changed_inputs.push(changed);
+
+        for changed in changed_inputs {
+            let err = svc
+                .issue_receipt(changed)
+                .await
+                .expect_err("changed proof material must conflict");
+            assert!(matches!(err, ServiceError::AlreadyExists(_)));
+        }
     }
 
     #[tokio::test]
@@ -1192,6 +1313,76 @@ mod tests {
         assert!(matches!(err, ServiceError::NotFound));
     }
 
+    #[tokio::test]
+    async fn verify_chain_rejects_bounds_from_another_chain() {
+        let service = service();
+        let other = service
+            .write_entry(WriteEntryInput {
+                entry_type: "other.chain".to_string(),
+                agent_id: "agent-1".to_string(),
+                content: b"payload".to_vec(),
+                content_type: "application/json".to_string(),
+                source_id: "test".to_string(),
+                correlation_id: None,
+                idempotency_key: None,
+                input_hash: None,
+                writer_signature: None,
+                signer_key_reference: None,
+                attestation_report: None,
+            })
+            .await
+            .expect("write other chain");
+
+        let err = service
+            .verify_chain("expected.chain", Some(other.entry_id), None)
+            .await
+            .expect_err("cross-chain bound must fail");
+        assert!(matches!(err, ServiceError::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn verify_chain_rejects_reversed_bounds() {
+        let service = service();
+        let first = service
+            .write_entry(WriteEntryInput {
+                entry_type: "bounded.chain".to_string(),
+                agent_id: "agent-1".to_string(),
+                content: b"first".to_vec(),
+                content_type: "application/json".to_string(),
+                source_id: "test".to_string(),
+                correlation_id: None,
+                idempotency_key: None,
+                input_hash: None,
+                writer_signature: None,
+                signer_key_reference: None,
+                attestation_report: None,
+            })
+            .await
+            .expect("write first");
+        let second = service
+            .write_entry(WriteEntryInput {
+                entry_type: "bounded.chain".to_string(),
+                agent_id: "agent-1".to_string(),
+                content: b"second".to_vec(),
+                content_type: "application/json".to_string(),
+                source_id: "test".to_string(),
+                correlation_id: None,
+                idempotency_key: None,
+                input_hash: None,
+                writer_signature: None,
+                signer_key_reference: None,
+                attestation_report: None,
+            })
+            .await
+            .expect("write second");
+
+        let err = service
+            .verify_chain("bounded.chain", Some(second.entry_id), Some(first.entry_id))
+            .await
+            .expect_err("reversed bounds must fail");
+        assert!(matches!(err, ServiceError::InvalidArgument(_)));
+    }
+
     #[derive(Default)]
     struct StaticRepo {
         entries: Mutex<HashMap<Uuid, LedgerEntryRecord>>,
@@ -1292,6 +1483,7 @@ mod tests {
             writer_signature: None,
             signer_key_reference: None,
             attestation_report: None,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: "bad-hash".to_string(),
             previous_hash: sha256_hex(b"ARE_LEDGER_GENESIS"),
             chain_position: 1,
@@ -1447,6 +1639,7 @@ mod tests {
                 Ok(ChainTip {
                     entry_id: Uuid::new_v4(),
                     hash: "tip".to_string(),
+                    hash_version: ENTRY_HASH_VERSION.to_string(),
                     position: 1,
                     written_ts: Utc::now(),
                 })
@@ -1543,6 +1736,7 @@ mod tests {
             writer_signature: None,
             signer_key_reference: None,
             attestation_report: None,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: "hash".to_string(),
             previous_hash: "missing-prev".to_string(),
             chain_position: 2,
@@ -1581,6 +1775,9 @@ mod tests {
             correlation_id: None,
             idempotency_key: None,
             input_hash: None,
+            writer_signature: None,
+            signer_key_reference: None,
+            attestation_report: None,
             chain_position: 1,
             written_ts_ms: entry1_ts.timestamp_millis(),
             previous_hash: &entry1_prev,
@@ -1598,6 +1795,7 @@ mod tests {
             writer_signature: None,
             signer_key_reference: None,
             attestation_report: None,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: entry1_hash,
             previous_hash: entry1_prev,
             chain_position: 1,
@@ -1616,6 +1814,7 @@ mod tests {
             writer_signature: None,
             signer_key_reference: None,
             attestation_report: None,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: "bad".to_string(),
             previous_hash: "wrong-prev".to_string(),
             chain_position: 2,
@@ -1700,6 +1899,37 @@ mod tests {
         let v = svc.verify_entry(w.entry_id).await.expect("verify");
         assert!(!v.hash_valid);
         assert_eq!(v.failure_reason, "entry_hash_mismatch");
+    }
+
+    #[tokio::test]
+    async fn v3_verify_proof_detects_signature_tamper() {
+        let repo = Arc::new(InMemoryLedgerRepository::default());
+        let svc = ImmutableLedgerService::new(repo.clone(), Arc::new(NoopEventPublisher), config());
+        let receipt = svc
+            .issue_receipt(WriteEntryInput {
+                entry_type: "governance.decision".to_string(),
+                agent_id: "strategy-agent".to_string(),
+                content: br#"{"decision":"approve"}"#.to_vec(),
+                content_type: "application/json".to_string(),
+                source_id: "strategy".to_string(),
+                input_hash: Some("sha256:input".to_string()),
+                writer_signature: Some(vec![1, 2, 3]),
+                signer_key_reference: Some("kms://signers/alice".to_string()),
+                attestation_report: Some(vec![4, 5, 6]),
+                correlation_id: None,
+                idempotency_key: None,
+            })
+            .await
+            .expect("write receipt");
+
+        assert!(repo.test_corrupt_writer_signature(receipt.entry_id).await);
+
+        let verified = svc
+            .verify_proof(&receipt.entry_type, &receipt.entry_hash)
+            .await
+            .expect("verify");
+        assert!(!verified.valid);
+        assert_eq!(verified.failure_reason, "entry_hash_mismatch");
     }
 
     #[tokio::test]
