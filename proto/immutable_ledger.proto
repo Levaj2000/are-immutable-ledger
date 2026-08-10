@@ -32,6 +32,7 @@ message WriteEntryResponse {
   string entry_hash = 2;
   string chain_position = 3;
   int64 written_ts = 4;
+  string hash_version = 5;
 }
 
 message GetEntryRequest { string entry_id = 1; }
@@ -80,6 +81,7 @@ message GetChainTipResponse {
   string entry_hash = 2;
   int64 chain_position = 3;
   int64 written_ts = 4;
+  string hash_version = 5;
 }
 
 message ProofReceipt {
@@ -92,6 +94,7 @@ message ProofReceipt {
   bytes writer_signature = 7;
   string signer_key_reference = 8;
   bytes attestation_report = 9;
+  string hash_version = 10;
 }
 
 message VerifyProofRequest {
@@ -113,6 +116,7 @@ message VerifyProofResponse {
   bytes writer_signature = 11;
   string signer_key_reference = 12;
   bytes attestation_report = 13;
+  string hash_version = 14;
 }
 
 message GetEntryByHashRequest {
@@ -137,5 +141,6 @@ message LedgerEntry {
   bytes writer_signature = 14;
   string signer_key_reference = 15;
   bytes attestation_report = 16;
+  string hash_version = 17;
 }
 

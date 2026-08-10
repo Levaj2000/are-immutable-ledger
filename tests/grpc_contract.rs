@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use are_immutable_ledger::config::AppConfig;
+use are_immutable_ledger::crypto::ENTRY_HASH_VERSION;
 use are_immutable_ledger::grpc::pb::immutable_ledger_service_client::ImmutableLedgerServiceClient;
 use are_immutable_ledger::grpc::{pb, ImmutableLedgerGrpc};
 use are_immutable_ledger::repository::InMemoryLedgerRepository;
@@ -71,6 +72,7 @@ async fn ig006_grpc_contract_smoke() {
         .await
         .expect("write")
         .into_inner();
+    assert_eq!(write.hash_version, ENTRY_HASH_VERSION);
     let get = client
         .get_entry(pb::GetEntryRequest {
             entry_id: write.entry_id.clone(),
@@ -78,7 +80,10 @@ async fn ig006_grpc_contract_smoke() {
         .await
         .expect("get")
         .into_inner();
-    assert!(get.entry.is_some());
+    assert_eq!(
+        get.entry.as_ref().map(|entry| entry.hash_version.as_str()),
+        Some(ENTRY_HASH_VERSION)
+    );
 
     let verify = client
         .verify_entry(pb::VerifyEntryRequest {
@@ -106,6 +111,7 @@ async fn ig006_grpc_contract_smoke() {
         .into_inner();
     assert_eq!(query.total_count, 1);
     assert_eq!(query.entries.len(), 1);
+    assert_eq!(query.entries[0].hash_version, ENTRY_HASH_VERSION);
 
     let chain_tip = client
         .get_chain_tip(pb::GetChainTipRequest {
@@ -115,6 +121,7 @@ async fn ig006_grpc_contract_smoke() {
         .expect("tip")
         .into_inner();
     assert!(!chain_tip.entry_id.is_empty());
+    assert_eq!(chain_tip.hash_version, ENTRY_HASH_VERSION);
 
     let chain_verify = client
         .verify_chain(pb::VerifyChainRequest {

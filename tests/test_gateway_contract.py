@@ -27,6 +27,7 @@ def _entry():
         writer_signature=b"",
         signer_key_reference="",
         attestation_report=b"",
+        hash_version="ARE_LEDGER_ENTRY_HASH_V3",
     )
 
 
@@ -35,9 +36,9 @@ class _FakeClient:
         self.query_kwargs = None
         self.closed = False
 
-    def query(self, **kwargs):
+    def query_page(self, **kwargs):
         self.query_kwargs = kwargs
-        return [_entry()]
+        return [_entry()], "next-page", 1
 
     def close(self):
         self.closed = True
@@ -53,12 +54,18 @@ def test_entries_query_forwards_unix_millisecond_window_and_input_hash(monkeypat
 
     assert response.status_code == 200
     assert ledger.query_kwargs == {
+        "page_size": 100,
+        "page_token": "",
         "correlation_id": "corr-1",
         "from_ts": 100,
         "to_ts": 200,
     }
     assert ledger.closed is True
-    assert response.get_json()[0]["input_hash"] == "c" * 64
+    body = response.get_json()
+    assert body["entries"][0]["input_hash"] == "c" * 64
+    assert body["entries"][0]["hash_version"] == "ARE_LEDGER_ENTRY_HASH_V3"
+    assert body["next_page_token"] == "next-page"
+    assert body["total_count"] == 1
 
 
 def test_entries_query_rejects_non_integer_time_window(monkeypatch):

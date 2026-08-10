@@ -63,6 +63,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
             entry_hash: output.entry_hash,
             chain_position: output.chain_position.to_string(),
             written_ts: output.written_ts_ms,
+            hash_version: output.hash_version,
         }))
     }
 
@@ -90,6 +91,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
                 writer_signature: entry.writer_signature.unwrap_or_default(),
                 signer_key_reference: entry.signer_key_reference.unwrap_or_default(),
                 attestation_report: entry.attestation_report.unwrap_or_default(),
+                hash_version: entry.hash_version,
             }),
         }))
     }
@@ -141,6 +143,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
                     writer_signature: entry.writer_signature.unwrap_or_default(),
                     signer_key_reference: entry.signer_key_reference.unwrap_or_default(),
                     attestation_report: entry.attestation_report.unwrap_or_default(),
+                    hash_version: entry.hash_version,
                 })
                 .collect(),
             next_page_token: next_token.unwrap_or_default(),
@@ -216,6 +219,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
             entry_hash: tip.hash,
             chain_position: tip.position,
             written_ts: tip.written_ts.timestamp_millis(),
+            hash_version: tip.hash_version,
         }))
     }
 
@@ -268,7 +272,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
             .map_err(map_err)?;
         Ok(Response::new(pb::ProofReceipt {
             entry_hash: receipt.entry_hash,
-            entry_type: input.entry_type.clone(),
+            entry_type: receipt.entry_type,
             chain_position: receipt.chain_position,
             written_ts: receipt.written_ts_ms,
             entry_id: receipt.entry_id.to_string(),
@@ -276,6 +280,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
             writer_signature: receipt.writer_signature,
             signer_key_reference: receipt.signer_key_reference,
             attestation_report: receipt.attestation_report,
+            hash_version: receipt.hash_version,
         }))
     }
 
@@ -312,6 +317,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
                 writer_signature: entry.writer_signature.unwrap_or_default(),
                 signer_key_reference: entry.signer_key_reference.unwrap_or_default(),
                 attestation_report: entry.attestation_report.unwrap_or_default(),
+                hash_version: entry.hash_version,
             }),
         }))
     }
@@ -345,6 +351,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static>
             writer_signature: output.writer_signature,
             signer_key_reference: output.signer_key_reference,
             attestation_report: output.attestation_report,
+            hash_version: output.hash_version,
         }))
     }
 }

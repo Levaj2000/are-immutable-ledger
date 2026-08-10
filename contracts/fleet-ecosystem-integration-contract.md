@@ -18,15 +18,18 @@ receipt propagation — apply to all integration paths.
 
 ## Trust and authorization boundary
 
-A `ProofReceipt` proves that a matching entry was written and that its canonical
-entry hash is valid. It is not a credential, capability, grant, passport, or
-authorization decision. In particular:
+A `ProofReceipt` proves that the ledger accepted and still contains a matching
+writer assertion under its recorded hash version. It does not independently
+prove the assertion is true or that the claimed check executed correctly. It
+is not a credential, capability, grant, passport, or authorization decision.
+In particular:
 
 - `VerifyProof.valid` means the stored entry matches its canonical hash.
 - `VerifyChain.chain_valid` establishes linkage for an exact `entry_type` chain.
 - `writer_signature`, `signer_key_reference`, and `attestation_report` are
-  opaque values stored and returned by the ledger; the ledger does not verify
-  them.
+  opaque values stored and returned by the ledger. V3 binds the bytes into the
+  canonical entry hash, but the ledger does not define the signature payload,
+  resolve the key, validate the signature, or appraise the attestation.
 - Bearer tokens on the gRPC service or REST gateway authenticate access to that
   deployment. They do not authorize a fleet action or policy decision.
 - Authorization decisions (fleet admission, CPEX policy evaluation, AuthBridge
@@ -61,8 +64,10 @@ The authoritative protobuf contract is
 
 `ProofReceipt` returns `entry_hash`, `entry_type`, `chain_position`,
 `written_ts` (Unix milliseconds), `entry_id`, `input_hash`, and the optional
-signature fields. Consumers must retain both `entry_hash` and `entry_type` for
-`VerifyProof`; use `VerifyChain` separately when claiming chain integrity.
+signature fields plus `hash_version`. Consumers must retain both `entry_hash`
+and `entry_type` for `VerifyProof`; use `VerifyChain` separately when claiming
+chain integrity. Consumers requiring bound signature or attestation evidence
+must require V3 because legacy V2 hashes did not cover those fields.
 
 ## Entry type namespace convention
 
@@ -117,9 +122,10 @@ The REST write body uses the same snake-case field names as
 `WriteEntryRequest`. Its `content` value is a UTF-8 string; arbitrary binary
 content should use the canonical gRPC API. `GET /api/entries` accepts the gRPC
 query field names, including Unix-millisecond `from_ts` and `to_ts`, and returns
-a JSON array whose entries contain `input_hash`, parsed `content` (when JSON),
-and `content_raw`. Shared deployments must configure `GATEWAY_API_TOKEN` and
-place the gateway behind a TLS-aware boundary.
+a paginated JSON object containing `entries`, `next_page_token`, and
+`total_count`. Each entry contains `input_hash`, `hash_version`, parsed
+`content` (when JSON), and `content_raw`. Shared deployments must configure
+`GATEWAY_API_TOKEN` and place the gateway behind a TLS-aware boundary.
 
 ## Proof receipt propagation
 
@@ -131,10 +137,13 @@ attaches the receipt to the forwarded request:
 X-Proof-Receipt: base64({"h":"<entry_hash>","t":"<entry_type>","ih":"<input_hash>"})
 ```
 
-The next hop calls `VerifyProof(entry_hash, entry_type)`. If valid and
-`input_hash` matches the current request body, it skips re-running the same
-check. If `input_hash` doesn't match (payload was transformed between hops),
-the downstream hop re-runs its check and issues its own receipt.
+The next hop calls `VerifyProof(entry_hash, entry_type)`. A `valid` response is
+only the ledger-integrity check. Before reusing the result, the consumer must
+also require an acceptable `hash_version`, verify the issuer signature and
+trust chain, validate attestation if required, compare `input_hash` with the
+current request, enforce freshness, check the policy/check version and scope,
+and apply local authorization. If any requirement fails, the downstream hop
+re-runs its check or rejects the request and may issue its own receipt.
 
 See `demo/joint-cpex/scenarios/07-multi-hop-receipt-chain.sh` for an executable
 example.

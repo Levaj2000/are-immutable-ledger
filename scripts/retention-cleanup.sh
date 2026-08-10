@@ -1,79 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ledger retention cleanup — deletes entries older than N days.
-# Breaks hash chain for deleted entries but keeps recent chain intact.
+# Non-destructive retention assessment for immutable-ledger operators.
+#
+# Raw row deletion is intentionally unsupported: removing ledger entries breaks
+# the chain history and makes later verification incomplete. See
+# docs/retention-and-archival.md for the archival safety requirements.
 #
 # Usage:
-#   ./scripts/retention-cleanup.sh              # default: 7 days
-#   ./scripts/retention-cleanup.sh 3            # keep last 3 days
-#   DRY_RUN=1 ./scripts/retention-cleanup.sh    # preview without deleting
-#
-# Run from infra01:
-#   oc exec -n immutable-ledger <db-pod> -- bash -c '...'
+#   ./scripts/retention-cleanup.sh       # report entries older than 7 days
+#   ./scripts/retention-cleanup.sh 30    # report entries older than 30 days
 
 RETAIN_DAYS="${1:-7}"
-DRY_RUN="${DRY_RUN:-0}"
 DB_NAME="${POSTGRESQL_DATABASE:-are_ledger}"
 DB_USER="${POSTGRESQL_USER:-ledger_writer}"
 SCHEMA="are_ledger"
 
-CUTOFF="NOW() - INTERVAL '${RETAIN_DAYS} days'"
+if ! [[ "$RETAIN_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "RETAIN_DAYS must be a positive integer." >&2
+    exit 2
+fi
 
-echo "Retention cleanup: keep last ${RETAIN_DAYS} days"
+if [ "${DELETE_OLD_ENTRIES:-0}" = "1" ]; then
+    echo "Refusing raw deletion: it would invalidate retained chain history." >&2
+    echo "Use a checkpointed, manifest-backed archival workflow when one is available." >&2
+    exit 2
+fi
 
-# Count what would be deleted
-COUNTS=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "
+echo "Retention assessment: entries older than ${RETAIN_DAYS} days"
+
+psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -c "
 SET search_path TO ${SCHEMA};
-SELECT entry_type, count(*)
+SELECT entry_type, count(*) AS candidate_entries
 FROM ledger_entries
-WHERE written_ts < ${CUTOFF}
+WHERE written_ts < NOW() - (:'retain_days' || ' days')::interval
 GROUP BY entry_type
-ORDER BY count(*) DESC;
-")
+ORDER BY candidate_entries DESC, entry_type;
+"
 
-echo "Entries older than ${RETAIN_DAYS} days:"
-echo "$COUNTS"
-
-TOTAL=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "
+psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -v retain_days="$RETAIN_DAYS" -c "
 SET search_path TO ${SCHEMA};
-SELECT count(*) FROM ledger_entries WHERE written_ts < ${CUTOFF};
-" | tr -d ' ')
+SELECT count(*) AS total_candidate_entries,
+       COALESCE(sum(octet_length(content)), 0) AS candidate_content_bytes
+FROM ledger_entries
+WHERE written_ts < NOW() - (:'retain_days' || ' days')::interval;
+"
 
-echo "Total to delete: ${TOTAL}"
-
-if [ "$DRY_RUN" = "1" ]; then
-    echo "DRY_RUN=1 — no changes made."
-    exit 0
-fi
-
-if [ "$TOTAL" = "0" ]; then
-    echo "Nothing to delete."
-    exit 0
-fi
-
-echo "Deleting in batches of 10000..."
-DELETED=0
-while true; do
-    BATCH=$(psql -U "$DB_USER" -d "$DB_NAME" -t -c "
-    SET search_path TO ${SCHEMA};
-    DELETE FROM ledger_entries
-    WHERE entry_id IN (
-        SELECT entry_id FROM ledger_entries
-        WHERE written_ts < ${CUTOFF}
-        LIMIT 10000
-    );
-    SELECT count(*) FROM ledger_entries WHERE written_ts < ${CUTOFF};
-    " | tail -1 | tr -d ' ')
-
-    DELETED=$((DELETED + 10000))
-    echo "  deleted batch... ${BATCH} remaining"
-
-    if [ "$BATCH" = "0" ]; then
-        break
-    fi
-done
-
-echo "Cleanup complete. Running VACUUM..."
-psql -U "$DB_USER" -d "$DB_NAME" -c "SET search_path TO ${SCHEMA}; VACUUM ANALYZE ledger_entries;"
-echo "Done."
+echo "Assessment complete. No rows were deleted."

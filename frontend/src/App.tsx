@@ -147,7 +147,7 @@ export default function App() {
                   <StoryStep num="2" text="Logs exist but prove nothing. OpenShell emits OCSF events to JSONL files — editable, deletable. Kagenti captures OTEL traces in Phoenix — overwritable. Policy engines evaluate decisions in their own databases. Three systems, three log formats, no cryptographic chain connecting them." />
                   <StoryStep num="3" text="Identity is self-asserted. When a guardrail logs 'check passed,' there's no signature proving which service made that claim. An attacker who reaches the logging endpoint can claim any identity. Red teams have demonstrated this — immutability without signed attestation doesn't close the gap." />
                   <StoryStep num="4" text="Payload transformation breaks trust. A guardrail checks the original request, but the next hop redacts a field or enriches the body. The downstream service has no way to know whether the upstream check covers the payload it's looking at — or a different version of it." />
-                  <StoryStep num="5" text="Existing immutable databases (QLDB, immudb) are single-system stores. They can prove their own entries weren't tampered with — but they can't correlate across independent systems, carry proof receipts between enforcement points, verify writer identity, or attest to runtime integrity. When compliance asks 'prove what this agent did end-to-end,' nobody has a unified answer." />
+                  <StoryStep num="5" text="Immutable stores can show whether accepted records changed. The harder governance problem is correlating independently supplied assertions and carrying their evidence between enforcement points without confusing integrity with truth, identity, or authorization." />
                 </div>
               </div>
             )}
@@ -223,7 +223,7 @@ export default function App() {
               <div>
                 <h3 style={{ marginBottom: 8 }}><SectionNum n="04" /> The Transformation</h3>
                 <SectionContext lines={[
-                  'The ledger doesn\'t just record what happened — it issues portable proof receipts. When AuthBridge runs a guardrail, the receipt travels with the request. Downstream services verify the proof instead of re-running the check.',
+                  'The ledger records what a writer asserted and issues a portable reference to that evidence. Downstream services validate the ledger proof, issuer evidence, payload binding, freshness, and policy context before deciding whether a check can be reused.',
                   'Click through the flow to see how a single request accumulates verified proofs as it moves through the pipeline.',
                 ]} />
                 <ReceiptFlow />
@@ -272,7 +272,7 @@ export default function App() {
                     What the ledger proves — and what it doesn't
                   </div>
                   <ClosingPoint text="Proves: entries were not modified after submission. V2 canonical hash commits to all fields — content, agent, source, correlation, chain position, timestamp." />
-                  <ClosingPoint text="Proves: proof receipts are tamper-evident. Swap the content, agent, or correlation ID and verification fails." />
+                  <ClosingPoint text="Shows: V3 proof envelopes are tamper-evident. Changing bound content, metadata, signature, key reference, or attestation makes verification fail." />
                   <ClosingPoint text="Proves: writer identity via optional signatures (Ed25519, SPIFFE SVIDs, DIDs). Proves runtime integrity via optional attestation reports (SGX, SEV-SNP). Three layers of proof, all stored, none interpreted by the ledger." />
                   <ClosingPoint text="Proves: cross-system events are correlatable by trace ID without shared identity." />
                   <ClosingPoint text="Does not prove: events are accurate when submitted. Attestation is the writer's responsibility. Receipts prove a claim was made, not that it's true. Integrity ≠ accuracy." />

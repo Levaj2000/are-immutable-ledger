@@ -12,7 +12,7 @@ use thiserror::Error;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::crypto::{canonical_entry_hash, CanonicalEntryHashInput};
+use crate::crypto::{canonical_entry_hash, CanonicalEntryHashInput, ENTRY_HASH_VERSION};
 
 #[derive(Debug, Clone)]
 pub struct LedgerEntryRecord {
@@ -28,6 +28,7 @@ pub struct LedgerEntryRecord {
     pub writer_signature: Option<Vec<u8>>,
     pub signer_key_reference: Option<String>,
     pub attestation_report: Option<Vec<u8>>,
+    pub hash_version: String,
     pub entry_hash: String,
     pub previous_hash: String,
     pub chain_position: i64,
@@ -55,6 +56,7 @@ pub enum OutboxStatus {
 pub struct ChainTip {
     pub entry_id: Uuid,
     pub hash: String,
+    pub hash_version: String,
     pub position: i64,
     pub written_ts: DateTime<Utc>,
 }
@@ -205,19 +207,23 @@ impl LedgerRepository for InMemoryLedgerRepository {
             correlation_id: input.correlation_id.as_deref(),
             idempotency_key: input.idempotency_key.as_deref(),
             input_hash: input.input_hash.as_deref(),
+            writer_signature: input.writer_signature.as_deref(),
+            signer_key_reference: input.signer_key_reference.as_deref(),
+            attestation_report: input.attestation_report.as_deref(),
             chain_position: next_position,
             written_ts_ms: input.written_ts.timestamp_millis(),
             previous_hash: &input.previous_hash,
         });
-        let outbox_payload = ledger_written_payload(
-            &entry_id,
-            &input.entry_type,
-            &input.agent_id,
-            &input.source_id,
-            &entry_hash,
-            input.correlation_id.as_deref(),
-            input.written_ts.timestamp_millis(),
-        );
+        let outbox_payload = ledger_written_payload(LedgerWrittenPayloadInput {
+            entry_id: &entry_id,
+            entry_type: &input.entry_type,
+            agent_id: &input.agent_id,
+            source_id: &input.source_id,
+            entry_hash: &entry_hash,
+            hash_version: ENTRY_HASH_VERSION,
+            correlation_id: input.correlation_id.as_deref(),
+            written_ts_ms: input.written_ts.timestamp_millis(),
+        });
         let entry = LedgerEntryRecord {
             entry_id,
             entry_type: input.entry_type.clone(),
@@ -231,6 +237,7 @@ impl LedgerRepository for InMemoryLedgerRepository {
             writer_signature: input.writer_signature,
             signer_key_reference: input.signer_key_reference,
             attestation_report: input.attestation_report,
+            hash_version: ENTRY_HASH_VERSION.to_string(),
             entry_hash: entry_hash.clone(),
             previous_hash: input.previous_hash,
             chain_position: next_position,
@@ -256,6 +263,7 @@ impl LedgerRepository for InMemoryLedgerRepository {
             ChainTip {
                 entry_id,
                 hash: entry_hash,
+                hash_version: ENTRY_HASH_VERSION.to_string(),
                 position: next_position,
                 written_ts: entry.written_ts,
             },
@@ -396,25 +404,29 @@ impl LedgerRepository for InMemoryLedgerRepository {
     }
 }
 
-pub fn ledger_written_payload(
-    entry_id: &Uuid,
-    entry_type: &str,
-    agent_id: &str,
-    source_id: &str,
-    entry_hash: &str,
-    correlation_id: Option<&str>,
-    written_ts_ms: i64,
-) -> String {
+pub struct LedgerWrittenPayloadInput<'a> {
+    pub entry_id: &'a Uuid,
+    pub entry_type: &'a str,
+    pub agent_id: &'a str,
+    pub source_id: &'a str,
+    pub entry_hash: &'a str,
+    pub hash_version: &'a str,
+    pub correlation_id: Option<&'a str>,
+    pub written_ts_ms: i64,
+}
+
+pub fn ledger_written_payload(input: LedgerWrittenPayloadInput<'_>) -> String {
     json!({
         "event_id": Uuid::new_v4().to_string(),
         "event_type": "LEDGER_ENTRY_WRITTEN",
-        "entry_id": entry_id.to_string(),
-        "entry_type": entry_type,
-        "agent_id": agent_id,
-        "source_id": source_id,
-        "entry_hash": entry_hash,
-        "correlation_id": correlation_id,
-        "written_ts": written_ts_ms,
+        "entry_id": input.entry_id.to_string(),
+        "entry_type": input.entry_type,
+        "agent_id": input.agent_id,
+        "source_id": input.source_id,
+        "entry_hash": input.entry_hash,
+        "hash_version": input.hash_version,
+        "correlation_id": input.correlation_id,
+        "written_ts": input.written_ts_ms,
         "schema_version": "1.0.0"
     })
     .to_string()
@@ -458,6 +470,16 @@ impl InMemoryLedgerRepository {
         let mut g = self.inner.write().await;
         if let Some(e) = g.entries.get_mut(&entry_id) {
             e.correlation_id = Some(correlation_id.to_string());
+            return true;
+        }
+        false
+    }
+
+    /// Corrupts stored proof material (tests only).
+    pub async fn test_corrupt_writer_signature(&self, entry_id: Uuid) -> bool {
+        let mut g = self.inner.write().await;
+        if let Some(e) = g.entries.get_mut(&entry_id) {
+            e.writer_signature = Some(b"tampered-signature".to_vec());
             return true;
         }
         false

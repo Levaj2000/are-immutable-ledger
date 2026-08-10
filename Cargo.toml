@@ -12,7 +12,7 @@ name = "are-immutable-ledger"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.100"
+anyhow = "1.0.103"
 async-trait = "0.1.89"
 axum = "0.8.6"
 base64 = "0.22.1"
@@ -29,7 +29,7 @@ serde_json = "1.0.140"
 sha2 = "0.11.0"
 thiserror = "2.0.12"
 tokio = { version = "1.47.1", features = ["full"] }
-tokio-postgres = { version = "0.7.17", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
+tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
 tokio-stream = "0.1.17"
 tonic = "0.14.1"
 tonic-prost = "0.14.1"
