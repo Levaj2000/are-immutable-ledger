@@ -224,6 +224,7 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
     fn start_outbox_processor(&self) {
         let repo = Arc::clone(&self.repo);
         let publisher = Arc::clone(&self.publisher);
+        let max_retries = self.config.outbox_max_retries;
         tokio::spawn(async move {
             loop {
                 let pending = match repo.pending_outbox().await {
@@ -234,9 +235,16 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
                     }
                 };
                 for record in pending {
-                    if publish_one(&*publisher, &repo, record).await.is_err() {
+                    let attempt = record.attempt_count;
+                    if publish_one(&*publisher, &repo, record, max_retries)
+                        .await
+                        .is_err()
+                    {
                         crate::metrics::OUTBOX_PUBLISH_FAILURE_TOTAL.inc();
-                        warn!("failed to publish outbox record");
+                        warn!(
+                            attempt_count = attempt + 1,
+                            max_retries, "failed to publish outbox record"
+                        );
                     }
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -754,15 +762,31 @@ async fn publish_one<R: LedgerRepository, P: EventPublisher>(
     publisher: &P,
     repo: &Arc<R>,
     record: OutboxRecord,
+    max_retries: u32,
 ) -> Result<(), ServiceError> {
-    publisher
-        .publish(&record)
-        .await
-        .map_err(ServiceError::Internal)?;
-    repo.mark_outbox_delivered(record.outbox_id)
-        .await
-        .map_err(map_repo)?;
-    Ok(())
+    match publisher.publish(&record).await {
+        Ok(()) => {
+            repo.mark_outbox_delivered(record.outbox_id)
+                .await
+                .map_err(map_repo)?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = repo.increment_outbox_attempt(record.outbox_id).await;
+            let next_attempt = record.attempt_count + 1;
+            if next_attempt >= max_retries as i32 {
+                let _ = repo.mark_outbox_failed(record.outbox_id).await;
+                warn!(
+                    outbox_id = %record.outbox_id,
+                    "outbox record permanently failed after {} attempts", next_attempt
+                );
+            } else {
+                let backoff_ms = 500 * 2u64.pow(next_attempt.min(10) as u32);
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            }
+            Err(ServiceError::Internal(err))
+        }
+    }
 }
 
 fn map_repo(err: RepositoryError) -> ServiceError {
@@ -812,7 +836,6 @@ mod tests {
             metrics_port: 8083,
             max_content_size_bytes: 1_048_576,
             db_connection_string: "postgres://local/test".to_string(),
-            read_replica_connection_string: None,
             outbox_http_endpoint: None,
             outbox_http_bearer_token: None,
             outbox_http_timeout_seconds: 10,
@@ -820,6 +843,7 @@ mod tests {
             pool_max_size: 16,
             chain_max_retries: 10,
             chain_halt_recovery_seconds: 60,
+            outbox_max_retries: 10,
             api_token: None,
             shutdown_token: None,
         })
@@ -1465,6 +1489,12 @@ mod tests {
         async fn mark_outbox_delivered(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
             Ok(())
         }
+        async fn increment_outbox_attempt(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
+            Ok(())
+        }
+        async fn mark_outbox_failed(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -1557,6 +1587,12 @@ mod tests {
             Ok(Vec::new())
         }
         async fn mark_outbox_delivered(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
+            Err(self.error.clone())
+        }
+        async fn increment_outbox_attempt(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
+            Err(self.error.clone())
+        }
+        async fn mark_outbox_failed(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
             Err(self.error.clone())
         }
     }
@@ -1676,6 +1712,15 @@ mod tests {
                 Ok(Vec::new())
             }
             async fn mark_outbox_delivered(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
+                Ok(())
+            }
+            async fn increment_outbox_attempt(
+                &self,
+                _outbox_id: Uuid,
+            ) -> Result<(), RepositoryError> {
+                Ok(())
+            }
+            async fn mark_outbox_failed(&self, _outbox_id: Uuid) -> Result<(), RepositoryError> {
                 Ok(())
             }
         }

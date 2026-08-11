@@ -20,7 +20,7 @@ lazy_static! {
     .expect("register are_ledger_chain_verify_failure_total");
     pub static ref OUTBOX_PUBLISH_FAILURE_TOTAL: Counter = register_counter!(
         "are_outbox_publish_failure_total",
-        "Outbox Kafka publish failures (record stays pending)"
+        "Outbox HTTP publish failures (record stays pending)"
     )
     .expect("register are_outbox_publish_failure_total");
     pub static ref WRITE_DURATION: Histogram = register_histogram!(

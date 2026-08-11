@@ -487,4 +487,47 @@ impl LedgerRepository for PostgresLedgerRepository {
         }
         Ok(())
     }
+
+    async fn increment_outbox_attempt(&self, outbox_id: Uuid) -> Result<(), RepositoryError> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        let n = client
+            .execute(
+                "UPDATE are_ledger.ledger_write_outbox
+                 SET attempt_count = attempt_count + 1,
+                     last_attempt_ts = NOW()
+                 WHERE outbox_id = $1",
+                &[&outbox_id],
+            )
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        if n == 0 {
+            return Err(RepositoryError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn mark_outbox_failed(&self, outbox_id: Uuid) -> Result<(), RepositoryError> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        let n = client
+            .execute(
+                "UPDATE are_ledger.ledger_write_outbox
+                 SET status = 'FAILED'
+                 WHERE outbox_id = $1",
+                &[&outbox_id],
+            )
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        if n == 0 {
+            return Err(RepositoryError::NotFound);
+        }
+        Ok(())
+    }
 }

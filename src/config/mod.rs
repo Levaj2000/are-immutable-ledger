@@ -9,7 +9,6 @@ pub struct AppConfig {
     pub metrics_port: u16,
     pub max_content_size_bytes: usize,
     pub db_connection_string: String,
-    pub read_replica_connection_string: Option<String>,
     pub outbox_http_endpoint: Option<String>,
     pub outbox_http_bearer_token: Option<String>,
     pub outbox_http_timeout_seconds: u64,
@@ -17,6 +16,7 @@ pub struct AppConfig {
     pub pool_max_size: usize,
     pub chain_max_retries: u32,
     pub chain_halt_recovery_seconds: u64,
+    pub outbox_max_retries: u32,
     pub api_token: Option<String>,
     pub shutdown_token: Option<String>,
 }
@@ -37,8 +37,6 @@ impl AppConfig {
             metrics_port: parse_u16("ARE_LEDGER_METRICS_PORT", 8083)?,
             max_content_size_bytes: parse_usize("ARE_LEDGER_MAX_CONTENT_SIZE_BYTES", 1_048_576)?,
             db_connection_string: required("ARE_LEDGER_DB_CONNECTION_STRING")?,
-            read_replica_connection_string: env::var("ARE_LEDGER_READ_REPLICA_CONNECTION_STRING")
-                .ok(),
             outbox_http_endpoint: optional("ARE_LEDGER_OUTBOX_HTTP_ENDPOINT"),
             outbox_http_bearer_token: optional("ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN"),
             outbox_http_timeout_seconds: parse_nonzero_u64(
@@ -53,6 +51,7 @@ impl AppConfig {
                 "ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS",
                 60,
             )?,
+            outbox_max_retries: parse_usize("ARE_LEDGER_OUTBOX_MAX_RETRIES", 10)? as u32,
             api_token: env::var("ARE_LEDGER_API_TOKEN").ok(),
             shutdown_token: env::var("ARE_LEDGER_SHUTDOWN_TOKEN").ok(),
         })
@@ -115,11 +114,11 @@ mod tests {
             "ARE_LEDGER_METRICS_PORT",
             "ARE_LEDGER_MAX_CONTENT_SIZE_BYTES",
             "ARE_LEDGER_DB_CONNECTION_STRING",
-            "ARE_LEDGER_READ_REPLICA_CONNECTION_STRING",
             "ARE_LEDGER_OUTBOX_HTTP_ENDPOINT",
             "ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN",
             "ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS",
             "ARE_LEDGER_GENESIS_HASH_INPUT",
+            "ARE_LEDGER_OUTBOX_MAX_RETRIES",
             "ARE_LEDGER_API_TOKEN",
             "ARE_LEDGER_SHUTDOWN_TOKEN",
         ];

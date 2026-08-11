@@ -177,7 +177,7 @@ fn authorize_grpc_request(
         .metadata()
         .get("authorization")
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|actual| actual == expected);
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()));
     if authorized {
         Ok(request)
     } else {
@@ -190,7 +190,20 @@ fn authorized_http(headers: &HeaderMap, token: &str) -> bool {
     headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|actual| actual == expected)
+        .is_some_and(|actual| constant_time_eq(actual.as_bytes(), expected.as_bytes()))
+}
+
+/// Constant-time byte comparison to prevent timing side-channels on token checks.
+/// Always iterates all bytes of both inputs; returns false immediately only on length mismatch.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 fn build_pool(config: &AppConfig) -> anyhow::Result<deadpool_postgres::Pool> {

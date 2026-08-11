@@ -145,6 +145,8 @@ pub trait LedgerRepository: Send + Sync {
     ) -> Result<LedgerEntryRecord, RepositoryError>;
     async fn pending_outbox(&self) -> Result<Vec<OutboxRecord>, RepositoryError>;
     async fn mark_outbox_delivered(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
+    async fn increment_outbox_attempt(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
+    async fn mark_outbox_failed(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
 }
 
 #[derive(Default, Clone)]
@@ -400,6 +402,24 @@ impl LedgerRepository for InMemoryLedgerRepository {
             return Err(RepositoryError::NotFound);
         };
         record.status = OutboxStatus::Delivered;
+        Ok(())
+    }
+
+    async fn increment_outbox_attempt(&self, outbox_id: Uuid) -> Result<(), RepositoryError> {
+        let mut guard = self.inner.write().await;
+        let Some(record) = guard.outbox.get_mut(&outbox_id) else {
+            return Err(RepositoryError::NotFound);
+        };
+        record.attempt_count += 1;
+        Ok(())
+    }
+
+    async fn mark_outbox_failed(&self, outbox_id: Uuid) -> Result<(), RepositoryError> {
+        let mut guard = self.inner.write().await;
+        let Some(record) = guard.outbox.get_mut(&outbox_id) else {
+            return Err(RepositoryError::NotFound);
+        };
+        record.status = OutboxStatus::Failed;
         Ok(())
     }
 }

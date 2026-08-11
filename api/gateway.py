@@ -50,8 +50,33 @@ def authorize_gateway_request():
     return None
 
 
+_client = None
+
+
 def get_client():
-    return LedgerClient(ENDPOINT)
+    """Return a module-level singleton LedgerClient (reused across requests)."""
+    global _client
+    if _client is None:
+        _client = LedgerClient(ENDPOINT)
+    return _client
+
+
+def _query_capped(max_entries=10000, **kwargs):
+    """Paginated query that stops after max_entries. Returns (entries, truncated)."""
+    c = get_client()
+    entries = []
+    page_token = ""
+    page_size = min(500, max_entries)
+    while True:
+        page, next_token, _total = c.query_page(
+            page_size=page_size, page_token=page_token, **kwargs)
+        entries.extend(page)
+        if len(entries) >= max_entries:
+            return entries[:max_entries], True
+        if not next_token:
+            break
+        page_token = next_token
+    return entries, False
 
 
 def entry_to_dict(e):
@@ -97,7 +122,6 @@ def write_entry():
         signer_key_reference=body.get("signer_key_reference", ""),
         attestation_report=bytes.fromhex(body["attestation_report"]) if body.get("attestation_report") else b"",
     )
-    c.close()
     return jsonify({
         "entry_id": resp.entry_id,
         "entry_hash": resp.entry_hash,
@@ -124,7 +148,6 @@ def issue_receipt():
         signer_key_reference=body.get("signer_key_reference", ""),
         attestation_report=bytes.fromhex(body["attestation_report"]) if body.get("attestation_report") else b"",
     )
-    c.close()
     return jsonify({
         "entry_hash": receipt.entry_hash,
         "entry_type": receipt.entry_type,
@@ -147,7 +170,6 @@ def verify_proof():
     if not entry_hash or not entry_type:
         return jsonify({"error": "hash and type query params required"}), 400
     v = c.verify_proof(entry_hash, entry_type)
-    c.close()
     return jsonify({
         "valid": v.valid,
         "entry_type": v.entry_type,
@@ -174,7 +196,6 @@ def get_entry_by_hash():
     if not entry_hash or not entry_type:
         return jsonify({"error": "hash and type query params required"}), 400
     entry = c.get_entry_by_hash(entry_hash, entry_type)
-    c.close()
     return jsonify(entry_to_dict(entry))
 
 
@@ -185,7 +206,6 @@ def receipt_chain():
     if not corr:
         return jsonify({"error": "correlation_id query param required"}), 400
     entries = c.query(correlation_id=corr)
-    c.close()
     sorted_entries = sorted(entries, key=lambda e: e.written_ts)
     return jsonify({
         "correlation_id": corr,
@@ -209,7 +229,6 @@ def get_entries():
             try:
                 kwargs[key] = int(val)
             except ValueError:
-                c.close()
                 return jsonify({"error": f"{key} must be Unix milliseconds"}), 400
     page_size = request.args.get("page_size", "100")
     try:
@@ -219,7 +238,6 @@ def get_entries():
     page_token = request.args.get("page_token", "")
     entries, next_token, total_count = c.query_page(
         page_size=page_size, page_token=page_token, **kwargs)
-    c.close()
     return jsonify({
         "entries": [entry_to_dict(e) for e in entries],
         "next_page_token": next_token,
@@ -229,8 +247,20 @@ def get_entries():
 
 @app.route("/api/summary")
 def get_summary():
-    c = get_client()
-    entries = c.query()
+    kwargs = {}
+    for key in ("entry_type", "source_id", "agent_id"):
+        val = request.args.get(key, "")
+        if val:
+            kwargs[key] = val
+    for key in ("from_ts", "to_ts"):
+        val = request.args.get(key, "")
+        if val:
+            try:
+                kwargs[key] = int(val)
+            except ValueError:
+                return jsonify({"error": f"{key} must be Unix milliseconds"}), 400
+    page_size = int(request.args.get("page_size", "10000"))
+    entries, truncated = _query_capped(max_entries=page_size, **kwargs)
     by_source = {}
     by_type = {}
     for e in entries:
@@ -242,49 +272,63 @@ def get_summary():
         sources = set(e.source_id for e in entries if e.correlation_id == cid)
         if len(sources) > 1:
             cross_system += 1
-    c.close()
-    return jsonify({
+    result = {
         "total_entries": len(entries),
         "sources": {s: len(es) for s, es in by_source.items()},
         "chain_types": len(by_type),
         "correlation_ids": len(corr_ids),
         "cross_system_correlations": cross_system,
-    })
+    }
+    if truncated:
+        result["truncated"] = True
+        result["truncated_note"] = f"Results capped at {page_size} entries; apply filters for accuracy"
+    return jsonify(result)
 
 
 @app.route("/api/chains")
 def get_chains():
-    c = get_client()
-    entries = c.query()
+    kwargs = {}
+    entry_type_filter = request.args.get("entry_type", "")
+    if entry_type_filter:
+        kwargs["entry_type"] = entry_type_filter
+    page_size = int(request.args.get("page_size", "10000"))
+    entries, truncated = _query_capped(max_entries=page_size, **kwargs)
     by_type = {}
     for e in entries:
         by_type.setdefault(e.entry_type, []).append(e)
     chains = []
-    for entry_type, es in sorted(by_type.items()):
+    for et, es in sorted(by_type.items()):
         source = "unknown"
-        if "openshell" in entry_type:
+        if "openshell" in et:
             source = "openshell"
-        elif "kagenti" in entry_type:
+        elif "kagenti" in et:
             source = "kagenti"
-        elif "gov." in entry_type:
+        elif "gov." in et:
             source = "governance"
-        elif "standalone" in entry_type:
+        elif "standalone" in et:
             source = "standalone"
         chains.append({
-            "entry_type": entry_type,
+            "entry_type": et,
             "count": len(es),
             "source": source,
             "entries": [entry_to_dict(e) for e in sorted(es, key=lambda x: x.chain_position)],
         })
-    c.close()
-    return jsonify(chains)
+    result = {"chains": chains}
+    if truncated:
+        result["truncated"] = True
+    return jsonify(result)
 
 
 @app.route("/api/verify")
 def verify_all():
     c = get_client()
-    entries = c.query()
-    types = sorted(set(e.entry_type for e in entries))
+    entry_type_filter = request.args.get("entry_type", "")
+    if entry_type_filter:
+        types = [entry_type_filter]
+    else:
+        # Discover all chain types (this is an audit operation so full scan is acceptable)
+        entries = c.query()
+        types = sorted(set(e.entry_type for e in entries))
     results = []
     for t in types:
         v = c.verify_chain(t)
@@ -295,7 +339,6 @@ def verify_all():
             "failure_reason": v.failure_reason or "",
             "first_invalid_entry_id": v.first_invalid_entry_id or "",
         })
-    c.close()
     all_valid = all(r["chain_valid"] for r in results)
     return jsonify({"all_valid": all_valid, "chains": results})
 
@@ -304,7 +347,6 @@ def verify_all():
 def verify_chain(entry_type):
     c = get_client()
     v = c.verify_chain(entry_type)
-    c.close()
     return jsonify({
         "entry_type": entry_type,
         "chain_valid": v.chain_valid,
@@ -315,27 +357,54 @@ def verify_chain(entry_type):
 
 @app.route("/api/timeline")
 def get_timeline():
-    c = get_client()
-    entries = c.query()
+    kwargs = {}
+    for key in ("correlation_id",):
+        val = request.args.get(key, "")
+        if val:
+            kwargs[key] = val
+    for key in ("from_ts", "to_ts"):
+        val = request.args.get(key, "")
+        if val:
+            try:
+                kwargs[key] = int(val)
+            except ValueError:
+                return jsonify({"error": f"{key} must be Unix milliseconds"}), 400
+    page_size = int(request.args.get("page_size", "10000"))
+    entries, truncated = _query_capped(max_entries=page_size, **kwargs)
     sorted_entries = sorted(entries, key=lambda e: e.written_ts)
     corr_map = {}
     for e in sorted_entries:
         if e.correlation_id:
             corr_map.setdefault(e.correlation_id, []).append(e.entry_id)
-    cross_links = {cid: ids for cid, ids in corr_map.items() if len(set(
-        next((e2.source_id for e2 in entries if e2.entry_id == eid), "") for eid in ids
-    )) > 0}
-    c.close()
-    return jsonify({
+    # Cross-system links: correlations that span multiple sources
+    entry_source = {e.entry_id: e.source_id for e in sorted_entries}
+    cross_links = {}
+    for cid, ids in corr_map.items():
+        sources = set(entry_source.get(eid, "") for eid in ids)
+        if len(sources) > 1:
+            cross_links[cid] = ids
+    result = {
         "entries": [entry_to_dict(e) for e in sorted_entries],
         "correlations": {cid: ids for cid, ids in corr_map.items() if len(ids) > 1},
-    })
+        "cross_links": cross_links,
+    }
+    if truncated:
+        result["truncated"] = True
+    return jsonify(result)
 
 
 @app.route("/api/drift")
 def get_drift():
-    c = get_client()
-    entries = c.query()
+    kwargs = {}
+    for key in ("from_ts", "to_ts"):
+        val = request.args.get(key, "")
+        if val:
+            try:
+                kwargs[key] = int(val)
+            except ValueError:
+                return jsonify({"error": f"{key} must be Unix milliseconds"}), 400
+    page_size = int(request.args.get("page_size", "10000"))
+    entries, truncated = _query_capped(max_entries=page_size, **kwargs)
     denials = [e for e in entries if
                b"Denied" in e.content or b"Blocked" in e.content or
                "deny" in e.entry_type]
@@ -359,12 +428,14 @@ def get_drift():
                 "entry_type": d.entry_type,
                 "detail": str(detail),
             })
-    c.close()
-    return jsonify({
+    result = {
         "gaps": gaps,
         "total_denials": len(denials),
         "total_scope_evals": len(scope_evals),
-    })
+    }
+    if truncated:
+        result["truncated"] = True
+    return jsonify(result)
 
 
 if __name__ == "__main__":

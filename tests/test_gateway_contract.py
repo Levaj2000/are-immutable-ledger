@@ -60,7 +60,7 @@ def test_entries_query_forwards_unix_millisecond_window_and_input_hash(monkeypat
         "from_ts": 100,
         "to_ts": 200,
     }
-    assert ledger.closed is True
+    assert ledger.closed is False  # singleton client is reused, not closed per-request
     body = response.get_json()
     assert body["entries"][0]["input_hash"] == "c" * 64
     assert body["entries"][0]["hash_version"] == "ARE_LEDGER_ENTRY_HASH_V3"
@@ -76,4 +76,4 @@ def test_entries_query_rejects_non_integer_time_window(monkeypatch):
 
     assert response.status_code == 400
     assert ledger.query_kwargs is None
-    assert ledger.closed is True
+    assert ledger.closed is False  # singleton client is reused, not closed per-request

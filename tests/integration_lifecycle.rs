@@ -11,7 +11,6 @@ fn config() -> Arc<AppConfig> {
         metrics_port: 8083,
         max_content_size_bytes: 1_048_576,
         db_connection_string: "postgres://local/test".to_string(),
-        read_replica_connection_string: None,
         outbox_http_endpoint: None,
         outbox_http_bearer_token: None,
         outbox_http_timeout_seconds: 10,
@@ -19,6 +18,7 @@ fn config() -> Arc<AppConfig> {
         pool_max_size: 16,
         chain_max_retries: 10,
         chain_halt_recovery_seconds: 60,
+        outbox_max_retries: 10,
         api_token: None,
         shutdown_token: None,
     })
