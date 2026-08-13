@@ -1,0 +1,3 @@
+{"class_uid": 4002, "class_name": "HTTP Activity", "metadata": {"uid": "sbx-test-001"}, "activity_name": "GET", "severity": "Informational", "unmapped": {"request_id": "trace-ocsf-001"}, "http_request": {"url": {"hostname": "api.github.com", "path": "/repos/test"}}}
+{"class_uid": 4001, "class_name": "Network Activity", "metadata": {"uid": "sbx-test-001"}, "activity_name": "DENY", "severity": "High", "unmapped": {"request_id": "trace-ocsf-002"}, "dst": {"ip": "10.0.0.1", "port": 443}}
+{"class_uid": 2004, "class_name": "Detection Finding", "metadata": {"uid": "sbx-test-001"}, "activity_name": "Create", "severity": "Critical", "unmapped": {"trace_id": "trace-ocsf-003"}, "finding": {"title": "Suspicious outbound connection"}}

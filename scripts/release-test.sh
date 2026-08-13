@@ -105,11 +105,19 @@ run_step "Proof explorer verify" python3 proof-explorer/proof.py verify --all
 # Chain integrity metric
 run_step "chain_integrity_valid gauge" bash -c 'sleep 3 && curl -sf http://localhost:18083/metrics | grep -q "are_ledger_chain_integrity_valid"'
 
-# MLflow webhook adapter smoke
+# Adapter smoke tests
 echo ""
 echo "  ── Adapter Smoke Tests ──"
 
-# Start webhook listener
+# OCSF adapter (OpenShell)
+run_step "OCSF adapter (OpenShell)" bash -c \
+    'python3 adapters/ocsf/ocsf_to_ledger.py --endpoint localhost:19292 --file adapters/ocsf/sample_events.jsonl'
+
+# OTEL adapter (Kagenti)
+run_step "OTEL adapter (Kagenti)" bash -c \
+    'python3 adapters/otel/otel_to_ledger.py --endpoint localhost:19292 --file adapters/otel/sample_spans.jsonl'
+
+# MLflow webhook adapter
 LEDGER_ENDPOINT=localhost:19292 python3 adapters/mlflow/webhook_listener.py > /tmp/webhook-listener.log 2>&1 &
 WEBHOOK_PID=$!
 sleep 2
@@ -122,8 +130,13 @@ else
     kill $WEBHOOK_PID 2>/dev/null || true
 fi
 
-# Final chain verification after all writes
-run_step "Final chain verify" python3 proof-explorer/proof.py verify --all
+# CPEX joint demo scenarios (if compose is running)
+if [ -f demo/joint-cpex/scenarios/_lib.sh ]; then
+    run_step "Sample data loader" bash -c 'cd demo && python3 sample-data/load-samples.py'
+fi
+
+# Final chain verification after all adapter writes
+run_step "Final chain verify (all adapters)" python3 proof-explorer/proof.py verify --all
 
 # Evidence matrix (if available)
 if [ -f tests/run_evidence.py ]; then
