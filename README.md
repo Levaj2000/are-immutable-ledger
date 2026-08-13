@@ -149,15 +149,23 @@ The service exposes Prometheus metrics at `/metrics` on `ARE_LEDGER_METRICS_PORT
 
 The standalone binary can deliver committed outbox events to an HTTP event sink. Set `ARE_LEDGER_OUTBOX_HTTP_ENDPOINT` to enable delivery, optionally set `ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN`, and use `ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS` to override the 10-second request timeout. Each request contains the stored JSON payload plus `Idempotency-Key` (the outbox ID) and `X-Ledger-Entry-ID` headers. Successful 2xx responses mark the row `DELIVERED`; transport errors and non-2xx responses leave it `PENDING` for retry. Records are permanently marked `FAILED` after `ARE_LEDGER_OUTBOX_MAX_RETRIES` attempts (default 10) with exponential backoff. Consumers must deduplicate by `Idempotency-Key` because delivery is at least once. When the endpoint is unset, publishing is disabled and rows remain `PENDING`.
 
-Connection pool and chain recovery are configurable:
+All configuration is via environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `ARE_LEDGER_DB_CONNECTION_STRING` | *(required)* | PostgreSQL connection string (supports `sslmode=require` for TLS) |
+| `ARE_LEDGER_GRPC_PORT` | 9092 | gRPC server listen port |
+| `ARE_LEDGER_HEALTH_PORT` | 8080 | Health/readiness HTTP server port |
+| `ARE_LEDGER_METRICS_PORT` | 8083 | Prometheus metrics HTTP server port |
+| `ARE_LEDGER_MAX_CONTENT_SIZE_BYTES` | 1048576 | Maximum entry content size (1 MiB) |
 | `ARE_LEDGER_POOL_MAX_SIZE` | 16 | PostgreSQL connection pool max size |
 | `ARE_LEDGER_CHAIN_MAX_RETRIES` | 10 | Retry attempts per write before chain halt |
 | `ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS` | 60 | Auto-recovery timeout for halted chains |
 | `ARE_LEDGER_VERIFY_INTERVAL_SECONDS` | 300 | Background chain verification interval (0 = disabled) |
 | `ARE_LEDGER_OUTBOX_MAX_RETRIES` | 10 | Max publish attempts before marking outbox record FAILED |
+| `ARE_LEDGER_GENESIS_HASH_INPUT` | `ARE_LEDGER_GENESIS` | Seed value for genesis hash of new chains |
+| `ARE_LEDGER_API_TOKEN` | *(unset)* | Bearer token for gRPC auth (disabled when unset) |
+| `ARE_LEDGER_SHUTDOWN_TOKEN` | *(unset)* | Bearer token for `/shutdownz` (endpoint hidden when unset) |
 
 Hash compatibility note: migration 006 labels existing rows as V2 and new rows as V3. Verification dispatches by each row's `hash_version`; unknown versions fail closed. V2 did not bind `writer_signature`, `signer_key_reference`, or `attestation_report`, so consumers requiring those properties must reject V2 receipts or re-issue evidence under V3. Do not relabel or re-hash historical rows in place.
 
