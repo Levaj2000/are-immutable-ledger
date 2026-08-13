@@ -45,6 +45,7 @@ No shared identity system required. No event format standardization required. Ea
 - **Idempotent** - optional idempotency keys prevent duplicate entries on retry; reusing a key with different content or metadata returns a conflict.
 - **Cross-system queries** - `QueryEntries` filters by agent_id, correlation_id, source_id, entry_type prefix, and time range. One query returns entries from all sources for the same agent or request.
 - **Hardened admin surface** - `/shutdownz` is disabled unless `ARE_LEDGER_SHUTDOWN_TOKEN` is set and requires a bearer token when enabled. gRPC bearer-token auth can be enabled with `ARE_LEDGER_API_TOKEN`.
+- **Health & verification** - `/healthz` for liveness, `/readyz` checks database connectivity and background chain verification result, `/verifyz` returns detailed JSON verification status. Background verifier runs every 5 minutes by default.
 - **Proof receipts** - `IssueReceipt` writes an entry and returns its persisted proof material. `VerifyProof` validates the stored canonical hash by hash and type without knowing the entry ID. It does not verify that the asserted check actually ran or was correct.
 - **Writer evidence** - optional `writer_signature` (opaque bytes) + `signer_key_reference` (key ID, SPIFFE SVID, DID). V3 binds both into the entry hash, but the ledger does not define the signed payload, resolve the key, validate its trust chain, or verify the signature. Consumers must do that work.
 - **Attestation evidence** - optional `attestation_report` (opaque bytes such as an SGX quote, SEV-SNP report, or RATS EAT token). V3 binds the bytes into the entry hash; consumers still validate format, endorsement chain, measurements, nonce/freshness, and policy.
@@ -144,8 +145,9 @@ The service exposes Prometheus metrics at `/metrics` on `ARE_LEDGER_METRICS_PORT
 - `are_ledger_chain_integrity_retries` — retry attempts per write due to chain contention
 - `are_ledger_chain_verify_failure_total` — chain verification detected invalid link or hash
 - `are_outbox_publish_failure_total` — outbox HTTP publish failures
+- `are_ledger_chain_integrity_valid` — background verifier result (1 = all chains valid, 0 = failure detected)
 
-The standalone binary can deliver committed outbox events to an HTTP event sink. Set `ARE_LEDGER_OUTBOX_HTTP_ENDPOINT` to enable delivery, optionally set `ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN`, and use `ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS` to override the 10-second request timeout. Each request contains the stored JSON payload plus `Idempotency-Key` (the outbox ID) and `X-Ledger-Entry-ID` headers. Successful 2xx responses mark the row `DELIVERED`; transport errors and non-2xx responses leave it `PENDING` for retry. Consumers must deduplicate by `Idempotency-Key` because delivery is at least once. When the endpoint is unset, publishing is disabled and rows remain `PENDING`.
+The standalone binary can deliver committed outbox events to an HTTP event sink. Set `ARE_LEDGER_OUTBOX_HTTP_ENDPOINT` to enable delivery, optionally set `ARE_LEDGER_OUTBOX_HTTP_BEARER_TOKEN`, and use `ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS` to override the 10-second request timeout. Each request contains the stored JSON payload plus `Idempotency-Key` (the outbox ID) and `X-Ledger-Entry-ID` headers. Successful 2xx responses mark the row `DELIVERED`; transport errors and non-2xx responses leave it `PENDING` for retry. Records are permanently marked `FAILED` after `ARE_LEDGER_OUTBOX_MAX_RETRIES` attempts (default 10) with exponential backoff. Consumers must deduplicate by `Idempotency-Key` because delivery is at least once. When the endpoint is unset, publishing is disabled and rows remain `PENDING`.
 
 Connection pool and chain recovery are configurable:
 
@@ -154,12 +156,14 @@ Connection pool and chain recovery are configurable:
 | `ARE_LEDGER_POOL_MAX_SIZE` | 16 | PostgreSQL connection pool max size |
 | `ARE_LEDGER_CHAIN_MAX_RETRIES` | 10 | Retry attempts per write before chain halt |
 | `ARE_LEDGER_CHAIN_HALT_RECOVERY_SECONDS` | 60 | Auto-recovery timeout for halted chains |
+| `ARE_LEDGER_VERIFY_INTERVAL_SECONDS` | 300 | Background chain verification interval (0 = disabled) |
+| `ARE_LEDGER_OUTBOX_MAX_RETRIES` | 10 | Max publish attempts before marking outbox record FAILED |
 
 Hash compatibility note: migration 006 labels existing rows as V2 and new rows as V3. Verification dispatches by each row's `hash_version`; unknown versions fail closed. V2 did not bind `writer_signature`, `signer_key_reference`, or `attestation_report`, so consumers requiring those properties must reject V2 receipts or re-issue evidence under V3. Do not relabel or re-hash historical rows in place.
 
 ## Security Notes
 
-For shared deployments, put the gRPC listener behind TLS/mTLS-capable infrastructure and set `ARE_LEDGER_API_TOKEN`; clients can pass the token explicitly or through the same environment variable. Set `ARE_LEDGER_SHUTDOWN_TOKEN` only for controlled graceful-shutdown drills, and call `/shutdownz` with `Authorization: Bearer <token>`.
+For shared deployments, set `sslmode=require` or `sslmode=verify-full` in `ARE_LEDGER_DB_CONNECTION_STRING` for encrypted Postgres connections (rustls-based, no OpenSSL dependency). Put the gRPC listener behind TLS/mTLS-capable infrastructure and set `ARE_LEDGER_API_TOKEN`; clients can pass the token explicitly or through the same environment variable. Set `ARE_LEDGER_SHUTDOWN_TOKEN` only for controlled graceful-shutdown drills, and call `/shutdownz` with `Authorization: Bearer <token>`.
 
 The optional Flask REST gateway is local-dev by default: it binds to `127.0.0.1`, runs with debug disabled, and only allows localhost Vite origins unless `GATEWAY_CORS_ORIGINS` is set. For shared use, set `GATEWAY_API_TOKEN`, keep it behind TLS/auth-aware infrastructure, and only widen `GATEWAY_HOST` or CORS origins intentionally.
 
@@ -201,6 +205,7 @@ Thin bridges for existing agentic systems:
 |---------|-------------|-------------|---------------------|
 | `adapters/ocsf/` | NVIDIA OpenShell | OCSF v1.7.0 JSONL | `openshell.*` |
 | `adapters/otel/` | Kagenti / any OTEL system | OTLP JSON spans | `kagenti.*` |
+| `adapters/mlflow/` | MLflow Registry | Webhook + Plugin | `mlflow.*` |
 | Direct gRPC | Any system | Any bytes | Your namespace |
 
 ## Architecture
@@ -236,6 +241,7 @@ contracts/                 Integration contracts (fleet ecosystem, CPEX/AuthBrid
 sdks/python/               Python client SDK (WriteEntry, IssueReceipt, VerifyProof, GetEntryByHash)
 adapters/ocsf/             OpenShell OCSF event bridge
 adapters/otel/             Kagenti/OTEL span bridge
+adapters/mlflow/             MLflow registry webhook listener + artifact/registry wrappers
 proof-explorer/            Query, verify, timeline, and drift CLI
 api/                       REST gateway for frontend (Flask)
 frontend/                  7-act narrative proof explorer (React + Vite + motion)
