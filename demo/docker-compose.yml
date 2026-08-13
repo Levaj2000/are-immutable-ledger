@@ -15,6 +15,8 @@ services:
       - ../migrations/004_input_hash.sql:/docker-entrypoint-initdb.d/05-input-hash.sql
       - ../migrations/005_writer_signature.sql:/docker-entrypoint-initdb.d/06-writer-signature.sql
       - ../migrations/006_proof_envelope_v3.sql:/docker-entrypoint-initdb.d/07-proof-envelope-v3.sql
+      - ../migrations/007_widen_entry_type.sql:/docker-entrypoint-initdb.d/08-widen-entry-type.sql
+      - ../migrations/008_widen_columns.sql:/docker-entrypoint-initdb.d/09-widen-columns.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ledger"]
       interval: 2s

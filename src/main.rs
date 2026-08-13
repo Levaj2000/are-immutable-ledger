@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::{
     http::{header, HeaderMap, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
@@ -22,6 +23,7 @@ use are_immutable_ledger::grpc::ImmutableLedgerGrpc;
 use are_immutable_ledger::metrics;
 use are_immutable_ledger::repository::PostgresLedgerRepository;
 use are_immutable_ledger::service::{HttpEventPublisher, ImmutableLedgerService};
+use are_immutable_ledger::verifier::{self, SharedVerificationStatus};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let pool = build_pool(&config).context("postgres pool creation")?;
+    let pool_for_health = pool.clone();
     let repo = Arc::new(PostgresLedgerRepository::new(pool));
     let publisher = Arc::new(
         HttpEventPublisher::new(
@@ -63,6 +66,21 @@ async fn main() -> anyhow::Result<()> {
         "configured outbox publisher"
     );
     let service = Arc::new(ImmutableLedgerService::new(repo, publisher, config.clone()));
+
+    let verification_status: SharedVerificationStatus = Arc::new(tokio::sync::RwLock::new(None));
+
+    if config.verify_interval_seconds > 0 {
+        verifier::spawn_background_verifier(
+            Arc::clone(&service),
+            Arc::clone(&verification_status),
+            Duration::from_secs(config.verify_interval_seconds),
+        );
+        info!(
+            interval_seconds = config.verify_interval_seconds,
+            "background chain verifier started"
+        );
+    }
+
     let grpc = ImmutableLedgerGrpc::new(service);
 
     let grpc_addr = SocketAddr::from(([0, 0, 0, 0], config.grpc_port));
@@ -103,9 +121,44 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let shutdown_tx_for_route = shutdown_tx.clone();
+    let pool_for_ready = pool_for_health.clone();
+    let status_for_ready = Arc::clone(&verification_status);
+    let status_for_verify = Arc::clone(&verification_status);
     let app = Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz", get(|| async { "ready" }))
+        .route(
+            "/readyz",
+            get(move || {
+                let pool = pool_for_ready.clone();
+                let status = status_for_ready.clone();
+                async move {
+                    if pool.get().await.is_err() {
+                        return (StatusCode::SERVICE_UNAVAILABLE, "database unavailable");
+                    }
+                    if let Some(ref v) = *status.read().await {
+                        if !v.all_valid {
+                            return (StatusCode::SERVICE_UNAVAILABLE, "chain verification failed");
+                        }
+                    }
+                    (StatusCode::OK, "ready")
+                }
+            }),
+        )
+        .route(
+            "/verifyz",
+            get(move || {
+                let status = status_for_verify.clone();
+                async move {
+                    let guard = status.read().await;
+                    match &*guard {
+                        Some(v) => axum::Json(serde_json::json!(v)).into_response(),
+                        None => {
+                            axum::Json(serde_json::json!({"status": "not_yet_run"})).into_response()
+                        }
+                    }
+                }
+            }),
+        )
         .route(
             "/shutdownz",
             post(move |headers: HeaderMap| {
@@ -214,7 +267,9 @@ fn build_pool(config: &AppConfig) -> anyhow::Result<deadpool_postgres::Pool> {
                 config.db_connection_string
             )
         })?;
-    let manager = deadpool_postgres::Manager::new(pg_config, tokio_postgres::NoTls);
+    let tls_connector = are_immutable_ledger::tls::make_pg_tls(&config.db_connection_string)
+        .context("configuring postgres TLS")?;
+    let manager = deadpool_postgres::Manager::new(pg_config, tls_connector);
     let pool = deadpool_postgres::Pool::builder(manager)
         .max_size(config.pool_max_size)
         .build()

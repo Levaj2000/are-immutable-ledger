@@ -656,6 +656,10 @@ impl<R: LedgerRepository + 'static, P: EventPublisher + 'static> ImmutableLedger
         })
     }
 
+    pub async fn get_distinct_entry_types(&self) -> Result<Vec<String>, ServiceError> {
+        self.repo.get_distinct_entry_types().await.map_err(map_repo)
+    }
+
     pub async fn get_chain_tip(
         &self,
         entry_type: &str,
@@ -844,6 +848,7 @@ mod tests {
             chain_max_retries: 10,
             chain_halt_recovery_seconds: 60,
             outbox_max_retries: 10,
+            verify_interval_seconds: 0,
             api_token: None,
             shutdown_token: None,
         })
@@ -1149,7 +1154,7 @@ mod tests {
         }
         let entries = service
             .repo
-            .get_entries_by_type("LEDGER_ENTRY_TYPE_POLICY_EVAL")
+            .get_entries_by_type_paged("LEDGER_ENTRY_TYPE_POLICY_EVAL", 0, 100)
             .await
             .expect("list");
         let positions: Vec<i64> = entries.iter().map(|entry| entry.chain_position).collect();
@@ -1438,25 +1443,14 @@ mod tests {
         async fn get_chain_tip(&self, _entry_type: &str) -> Result<ChainTip, RepositoryError> {
             Err(RepositoryError::NotFound)
         }
-        async fn get_entries_by_type(
-            &self,
-            entry_type: &str,
-        ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-            Ok(self
-                .entries_by_type
-                .lock()
-                .await
-                .get(entry_type)
-                .cloned()
-                .unwrap_or_default())
-        }
         async fn get_entries_by_type_paged(
             &self,
             entry_type: &str,
             after_position: i64,
             limit: i64,
         ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-            let all = self.get_entries_by_type(entry_type).await?;
+            let guard = self.entries_by_type.lock().await;
+            let all = guard.get(entry_type).cloned().unwrap_or_default();
             Ok(all
                 .into_iter()
                 .filter(|e| e.chain_position > after_position)
@@ -1469,6 +1463,12 @@ mod tests {
             _idempotency_key: &str,
         ) -> Result<Option<LedgerEntryRecord>, RepositoryError> {
             Ok(None)
+        }
+        async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError> {
+            let guard = self.entries_by_type.lock().await;
+            let mut types: Vec<String> = guard.keys().cloned().collect();
+            types.sort();
+            Ok(types)
         }
         async fn get_entry_by_hash(
             &self,
@@ -1555,12 +1555,6 @@ mod tests {
         async fn get_chain_tip(&self, _entry_type: &str) -> Result<ChainTip, RepositoryError> {
             Err(self.error.clone())
         }
-        async fn get_entries_by_type(
-            &self,
-            _entry_type: &str,
-        ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-            Err(self.error.clone())
-        }
         async fn get_entries_by_type_paged(
             &self,
             _entry_type: &str,
@@ -1574,6 +1568,9 @@ mod tests {
             _entry_type: &str,
             _idempotency_key: &str,
         ) -> Result<Option<LedgerEntryRecord>, RepositoryError> {
+            Err(self.error.clone())
+        }
+        async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError> {
             Err(self.error.clone())
         }
         async fn get_entry_by_hash(
@@ -1680,12 +1677,6 @@ mod tests {
                     written_ts: Utc::now(),
                 })
             }
-            async fn get_entries_by_type(
-                &self,
-                _entry_type: &str,
-            ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-                Ok(Vec::new())
-            }
             async fn get_entries_by_type_paged(
                 &self,
                 _entry_type: &str,
@@ -1700,6 +1691,9 @@ mod tests {
                 _idempotency_key: &str,
             ) -> Result<Option<LedgerEntryRecord>, RepositoryError> {
                 Ok(None)
+            }
+            async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError> {
+                Ok(Vec::new())
             }
             async fn get_entry_by_hash(
                 &self,

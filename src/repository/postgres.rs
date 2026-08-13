@@ -352,29 +352,6 @@ impl LedgerRepository for PostgresLedgerRepository {
         })
     }
 
-    async fn get_entries_by_type(
-        &self,
-        entry_type: &str,
-    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-        let client = self
-            .pool
-            .get()
-            .await
-            .map_err(|_| RepositoryError::Unavailable)?;
-        let rows = client
-            .query(
-                "SELECT entry_id, entry_type, agent_id, content, content_type, source_id,
-                        correlation_id, idempotency_key, input_hash, writer_signature, signer_key_reference, attestation_report, hash_version, entry_hash, previous_hash, chain_position, written_ts
-                 FROM are_ledger.ledger_entries
-                 WHERE entry_type = $1
-                 ORDER BY chain_position",
-                &[&entry_type],
-            )
-            .await
-            .map_err(|_| RepositoryError::Unavailable)?;
-        Ok(rows.iter().map(Self::map_row_entry).collect())
-    }
-
     async fn get_entries_by_type_paged(
         &self,
         entry_type: &str,
@@ -529,5 +506,21 @@ impl LedgerRepository for PostgresLedgerRepository {
             return Err(RepositoryError::NotFound);
         }
         Ok(())
+    }
+
+    async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        let rows = client
+            .query(
+                "SELECT DISTINCT entry_type FROM are_ledger.ledger_entries ORDER BY entry_type",
+                &[],
+            )
+            .await
+            .map_err(|_| RepositoryError::Unavailable)?;
+        Ok(rows.iter().map(|r| r.get("entry_type")).collect())
     }
 }

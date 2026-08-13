@@ -17,6 +17,7 @@ pub struct AppConfig {
     pub chain_max_retries: u32,
     pub chain_halt_recovery_seconds: u64,
     pub outbox_max_retries: u32,
+    pub verify_interval_seconds: u64,
     pub api_token: Option<String>,
     pub shutdown_token: Option<String>,
 }
@@ -52,6 +53,12 @@ impl AppConfig {
                 60,
             )?,
             outbox_max_retries: parse_usize("ARE_LEDGER_OUTBOX_MAX_RETRIES", 10)? as u32,
+            verify_interval_seconds: match env::var("ARE_LEDGER_VERIFY_INTERVAL_SECONDS") {
+                Ok(raw) => raw.parse::<u64>().map_err(|_| {
+                    ConfigError::InvalidInteger("ARE_LEDGER_VERIFY_INTERVAL_SECONDS".to_string())
+                })?,
+                Err(_) => 300,
+            },
             api_token: env::var("ARE_LEDGER_API_TOKEN").ok(),
             shutdown_token: env::var("ARE_LEDGER_SHUTDOWN_TOKEN").ok(),
         })
@@ -119,6 +126,7 @@ mod tests {
             "ARE_LEDGER_OUTBOX_HTTP_TIMEOUT_SECONDS",
             "ARE_LEDGER_GENESIS_HASH_INPUT",
             "ARE_LEDGER_OUTBOX_MAX_RETRIES",
+            "ARE_LEDGER_VERIFY_INTERVAL_SECONDS",
             "ARE_LEDGER_API_TOKEN",
             "ARE_LEDGER_SHUTDOWN_TOKEN",
         ];

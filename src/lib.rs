@@ -7,3 +7,5 @@ pub mod grpc;
 pub mod metrics;
 pub mod repository;
 pub mod service;
+pub mod tls;
+pub mod verifier;

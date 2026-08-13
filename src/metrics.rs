@@ -2,8 +2,8 @@
 
 use lazy_static::lazy_static;
 use prometheus::{
-    register_counter, register_counter_vec, register_histogram, Counter, CounterVec, Encoder,
-    Histogram, TextEncoder,
+    register_counter, register_counter_vec, register_histogram, register_int_gauge, Counter,
+    CounterVec, Encoder, Histogram, IntGauge, TextEncoder,
 };
 
 lazy_static! {
@@ -41,6 +41,11 @@ lazy_static! {
         vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
     )
     .expect("register are_ledger_chain_integrity_retries");
+    pub static ref CHAIN_INTEGRITY_VALID: IntGauge = register_int_gauge!(
+        "are_ledger_chain_integrity_valid",
+        "1 if all chains passed last background verification, 0 if any failed"
+    )
+    .expect("register are_ledger_chain_integrity_valid");
 }
 
 pub fn inc_write(result: &'static str) {

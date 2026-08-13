@@ -1,5 +1,4 @@
 use thiserror::Error;
-use tokio_postgres::NoTls;
 
 #[derive(Debug, Error)]
 pub enum DbPermissionError {
@@ -16,7 +15,9 @@ pub enum DbPermissionError {
 pub async fn verify_ledger_entries_immutable(
     connection_string: &str,
 ) -> Result<(), DbPermissionError> {
-    let (client, connection) = tokio_postgres::connect(connection_string, NoTls)
+    let tls_connector = crate::tls::make_pg_tls(connection_string)
+        .map_err(|e| DbPermissionError::Connect(e.to_string()))?;
+    let (client, connection) = tokio_postgres::connect(connection_string, tls_connector)
         .await
         .map_err(|err| DbPermissionError::Connect(err.to_string()))?;
     tokio::spawn(async move {

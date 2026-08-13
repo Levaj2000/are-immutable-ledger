@@ -123,10 +123,6 @@ pub trait LedgerRepository: Send + Sync {
     async fn get_entry(&self, entry_id: Uuid) -> Result<LedgerEntryRecord, RepositoryError>;
     async fn query_entries(&self, query: EntryQuery) -> Result<QueryResult, RepositoryError>;
     async fn get_chain_tip(&self, entry_type: &str) -> Result<ChainTip, RepositoryError>;
-    async fn get_entries_by_type(
-        &self,
-        entry_type: &str,
-    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError>;
     async fn get_entries_by_type_paged(
         &self,
         entry_type: &str,
@@ -147,6 +143,7 @@ pub trait LedgerRepository: Send + Sync {
     async fn mark_outbox_delivered(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
     async fn increment_outbox_attempt(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
     async fn mark_outbox_failed(&self, outbox_id: Uuid) -> Result<(), RepositoryError>;
+    async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError>;
 }
 
 #[derive(Default, Clone)]
@@ -316,23 +313,6 @@ impl LedgerRepository for InMemoryLedgerRepository {
             .ok_or(RepositoryError::NotFound)
     }
 
-    async fn get_entries_by_type(
-        &self,
-        entry_type: &str,
-    ) -> Result<Vec<LedgerEntryRecord>, RepositoryError> {
-        let guard = self.inner.read().await;
-        let Some(ids) = guard.ordered_by_type.get(entry_type) else {
-            return Ok(Vec::new());
-        };
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(entry) = guard.entries.get(id) {
-                out.push(entry.clone());
-            }
-        }
-        Ok(out)
-    }
-
     async fn get_entries_by_type_paged(
         &self,
         entry_type: &str,
@@ -421,6 +401,13 @@ impl LedgerRepository for InMemoryLedgerRepository {
         };
         record.status = OutboxStatus::Failed;
         Ok(())
+    }
+
+    async fn get_distinct_entry_types(&self) -> Result<Vec<String>, RepositoryError> {
+        let guard = self.inner.read().await;
+        let mut types: Vec<String> = guard.ordered_by_type.keys().cloned().collect();
+        types.sort();
+        Ok(types)
     }
 }
 

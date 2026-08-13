@@ -22,6 +22,7 @@ fn config() -> Arc<AppConfig> {
         chain_max_retries: 10,
         chain_halt_recovery_seconds: 60,
         outbox_max_retries: 10,
+        verify_interval_seconds: 0,
         api_token: None,
         shutdown_token: None,
     })
