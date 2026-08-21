@@ -47,7 +47,8 @@ CI: GitHub Actions runs `rust` (fmt, clippy, test) and `gateway` (Python pytest)
 | `src/service/` | Business logic: validation, chain tips, retry, halt/recovery, proof receipts |
 | `src/repository/` | LedgerRepository trait + Postgres (deadpool-postgres, advisory locks) and InMemory impls |
 | `migrations/` | 8 SQL migrations |
-| `api/gateway.py` | Flask REST gateway (proxies to gRPC via Python SDK) |
+| `api/gateway.py` | Flask REST gateway (proxies to gRPC via Python SDK). This is the one `api/Dockerfile` ships. |
+| `api/gateway_fastapi.py` | Unused async rewrite. Its docstring claims it replaces the Flask gateway, but nothing builds or deploys it. Keep the two in sync or delete one. |
 | `frontend/` | React + Vite + TypeScript proof explorer UI (@xyflow/react, zustand) |
 | `sdks/python/` | Python gRPC client SDK |
 | `adapters/ocsf/` | NVIDIA OCSF event bridge |
