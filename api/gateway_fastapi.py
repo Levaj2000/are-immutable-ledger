@@ -5,6 +5,7 @@ No memory leak from thread accumulation under sustained write load.
 """
 
 import asyncio
+import hmac
 import json
 import os
 import sys
@@ -40,12 +41,37 @@ app.add_middleware(
 )
 
 
+# See api/gateway.py for the rationale. Kept identical so the two copies
+# cannot drift on a security control while both exist.
+ALLOW_UNAUTHENTICATED = os.environ.get(
+    "GATEWAY_ALLOW_UNAUTHENTICATED", ""
+).strip().lower() in {"1", "true", "yes"}
+
+if not GATEWAY_API_TOKEN and not ALLOW_UNAUTHENTICATED:
+    raise SystemExit(
+        "GATEWAY_API_TOKEN is not set. The ledger gateway writes evidence and "
+        "will not run unauthenticated. Set GATEWAY_API_TOKEN, or set "
+        "GATEWAY_ALLOW_UNAUTHENTICATED=true for local development."
+    )
+
+UNAUTHENTICATED_PATHS = {"/healthz"}
+
+
+@app.get("/healthz")
+async def healthz():
+    """Liveness and readiness probe. Never requires credentials."""
+    return {"status": "ok", "service": "are-ledger-gateway"}
+
+
 @app.middleware("http")
 async def authorize(request: Request, call_next):
-    if request.method == "OPTIONS" or not GATEWAY_API_TOKEN:
+    if request.method == "OPTIONS" or request.url.path in UNAUTHENTICATED_PATHS:
         return await call_next(request)
+    if not GATEWAY_API_TOKEN:
+        return await call_next(request)  # only via GATEWAY_ALLOW_UNAUTHENTICATED
     expected = f"Bearer {GATEWAY_API_TOKEN}"
-    if request.headers.get("Authorization", "") != expected:
+    presented = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(presented, expected):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     return await call_next(request)
 

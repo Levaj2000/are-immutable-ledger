@@ -13,6 +13,7 @@ Receipt verification:
   GET  /api/receipts/chain       — trust chain for a correlation_id
 """
 
+import hmac
 import json
 import os
 import sys
@@ -40,12 +41,49 @@ def cors_origins():
 CORS(app, origins=cors_origins())
 
 
+
+# Authentication.
+#
+# This gateway fronts the append-only ledger: POST /api/entries and
+# POST /api/receipts write the evidence the rest of the platform treats as
+# authoritative. The previous check skipped authentication entirely when
+# GATEWAY_API_TOKEN was unset, so a gateway deployed without the variable
+# accepted anonymous writes -- and no manifest set it.
+#
+# It now fails closed. Running without a token requires the operator to say
+# so explicitly with GATEWAY_ALLOW_UNAUTHENTICATED=true, which is intended
+# for local development and the demo compose stack only.
+#
+# /healthz is always reachable so container probes do not need credentials.
+ALLOW_UNAUTHENTICATED = os.environ.get(
+    "GATEWAY_ALLOW_UNAUTHENTICATED", ""
+).strip().lower() in {"1", "true", "yes"}
+
+if not GATEWAY_API_TOKEN and not ALLOW_UNAUTHENTICATED:
+    raise SystemExit(
+        "GATEWAY_API_TOKEN is not set. The ledger gateway writes evidence and "
+        "will not run unauthenticated. Set GATEWAY_API_TOKEN, or set "
+        "GATEWAY_ALLOW_UNAUTHENTICATED=true for local development."
+    )
+
+UNAUTHENTICATED_PATHS = {"/healthz"}
+
+
+@app.get("/healthz")
+def healthz():
+    """Liveness and readiness probe. Never requires credentials."""
+    return jsonify({"status": "ok", "service": "are-ledger-gateway"})
+
+
 @app.before_request
 def authorize_gateway_request():
-    if request.method == "OPTIONS" or not GATEWAY_API_TOKEN:
+    if request.method == "OPTIONS" or request.path in UNAUTHENTICATED_PATHS:
         return None
+    if not GATEWAY_API_TOKEN:
+        return None  # only reachable via GATEWAY_ALLOW_UNAUTHENTICATED
     expected = f"Bearer {GATEWAY_API_TOKEN}"
-    if request.headers.get("Authorization", "") != expected:
+    presented = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(presented, expected):
         return jsonify({"error": "unauthorized"}), 401
     return None
 

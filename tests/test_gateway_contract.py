@@ -1,8 +1,14 @@
 """Focused REST compatibility tests for fleet ecosystem queries."""
 
+import os
 from types import SimpleNamespace
 
 import pytest
+
+# The gateway refuses to start without GATEWAY_API_TOKEN. These tests cover
+# query forwarding rather than authentication, so they opt into unauthenticated
+# mode explicitly; tests/test_gateway_auth.py covers the auth behaviour itself.
+os.environ.setdefault("GATEWAY_ALLOW_UNAUTHENTICATED", "true")
 
 gateway = pytest.importorskip(
     "api.gateway",

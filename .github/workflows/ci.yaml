@@ -40,7 +40,12 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r api/requirements.txt pytest pip-audit
       - name: Test gateway contract
-        run: python -m pytest -q tests/test_gateway_contract.py
+        env:
+          # The gateway refuses to start unauthenticated unless told to. These
+          # contract tests cover query forwarding, not auth; auth itself is
+          # covered by tests/test_gateway_auth.py, which sets its own env.
+          GATEWAY_ALLOW_UNAUTHENTICATED: "true"
+        run: python -m pytest -q tests/test_gateway_contract.py tests/test_gateway_auth.py
       - name: Audit Python dependencies
         run: python -m pip_audit -r api/requirements.txt
 

@@ -173,7 +173,7 @@ Hash compatibility note: migration 006 labels existing rows as V2 and new rows a
 
 For shared deployments, set `sslmode=require` or `sslmode=verify-full` in `ARE_LEDGER_DB_CONNECTION_STRING` for encrypted Postgres connections (rustls-based, no OpenSSL dependency). Put the gRPC listener behind TLS/mTLS-capable infrastructure and set `ARE_LEDGER_API_TOKEN`; clients can pass the token explicitly or through the same environment variable. Set `ARE_LEDGER_SHUTDOWN_TOKEN` only for controlled graceful-shutdown drills, and call `/shutdownz` with `Authorization: Bearer <token>`.
 
-The optional Flask REST gateway is local-dev by default: it binds to `127.0.0.1`, runs with debug disabled, and only allows localhost Vite origins unless `GATEWAY_CORS_ORIGINS` is set. For shared use, set `GATEWAY_API_TOKEN`, keep it behind TLS/auth-aware infrastructure, and only widen `GATEWAY_HOST` or CORS origins intentionally.
+The Flask REST gateway requires `GATEWAY_API_TOKEN` and will not start without it, because it writes ledger evidence. For local development set `GATEWAY_ALLOW_UNAUTHENTICATED=true` to run it open deliberately. It binds to `127.0.0.1`, runs with debug disabled, and only allows localhost Vite origins unless `GATEWAY_CORS_ORIGINS` is set. `/healthz` is exempt from authentication so container probes do not need the token. Keep it behind TLS/auth-aware infrastructure, and only widen `GATEWAY_HOST` or CORS origins intentionally.
 
 ## Demo: Cross-System Proof
 

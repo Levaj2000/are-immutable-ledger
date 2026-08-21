@@ -105,12 +105,23 @@ spec:
               value: "28099"
             - name: GATEWAY_HOST
               value: "0.0.0.0"
+            # The gateway writes ledger evidence and refuses to start without
+            # this. Create the Secret before applying:
+            #   oc create secret generic ledger-gateway-auth \
+            #     --from-literal=api-token="$(openssl rand -hex 32)"
+            - name: GATEWAY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-gateway-auth
+                  key: api-token
           ports:
             - containerPort: 28099
               name: http
           readinessProbe:
             httpGet:
-              path: /api/summary
+              # /healthz is exempt from authentication; /api/summary now
+              # requires the bearer token and would fail the probe.
+              path: /healthz
               port: 28099
             initialDelaySeconds: 15
             periodSeconds: 30
