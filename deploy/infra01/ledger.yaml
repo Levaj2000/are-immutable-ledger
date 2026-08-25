@@ -95,7 +95,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway:latest
+          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway@sha256:bc347d880a3584429bfb91d76d601fee1c63d14bd44e7ce0d7bd311fe276b9d8
           env:
             - name: LEDGER_GRPC_ENDPOINT
               value: "localhost:9092"
@@ -133,7 +133,7 @@ spec:
               cpu: 250m
               memory: 128Mi
         - name: ledger-core
-          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-immutable-ledger:latest
+          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-immutable-ledger@sha256:7351b19025b6a7d897890a64f3066121aad60c52f18492ed7eb315504a325ec9
           env:
             - name: DATABASE_URL
               valueFrom:

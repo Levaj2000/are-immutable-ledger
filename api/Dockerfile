@@ -12,4 +12,4 @@ USER 1001
 EXPOSE 28099
 ENV LEDGER_ENDPOINT=localhost:19292
 ENV GATEWAY_PORT=28099
-CMD ["python", "api/gateway.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:28099", "--workers", "2", "--threads", "4", "--timeout", "30", "--graceful-timeout", "30", "--access-logfile", "-", "api.gateway:app"]
