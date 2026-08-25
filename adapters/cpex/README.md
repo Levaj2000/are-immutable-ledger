@@ -44,7 +44,7 @@ Gap detection is **alert-and-continue** — records are still written to the led
 
 ## Content Canonicalization
 
-Envelope fields (`unmapped.signature_b64`, `unmapped.signature_key_id`, `unmapped.fingerprint`, `unmapped.prev_fingerprint`) are stripped before canonicalization. The remaining event is JCS-canonicalized (RFC 8785) and SHA-256 hashed. This ensures both the CPEX fingerprint chain and the ledger's V3 entry hash commit to the same canonical bytes.
+Covered bytes follow [AID-EMIT-1 section 4](https://github.com/Levaj2000/AI-Identity/blob/main/docs/specs/aid-emit-1.md): `attestation_list[0].fingerprint`, `attestation_list[0].signatures`, `unmapped.signature_b64`, and `unmapped.signature_key_id` are stripped before JCS canonicalization (RFC 8785). An empty `unmapped` object is removed. Attestation identity, authority, chain identity, and `prev_event` remain covered. The resulting SHA-256 `input_hash` therefore reproduces the emitter fingerprint; the ledger's V3 entry hash then durably binds those canonical content bytes with ledger metadata and chain position.
 
 ## Production Path
 

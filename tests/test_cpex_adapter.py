@@ -245,6 +245,39 @@ class TestCanonicalization:
         content = json.loads(canonical_bytes)
         assert content["unmapped"]["custom_field"] == "keep-me"
 
+    def test_aid_emit_attestation_derivations_stripped(self):
+        event = make_decision_event()
+        event["attestation_list"] = [
+            {
+                "uid": "att-1",
+                "chain_uid": "chain-1",
+                "authority_uid": "authority-1",
+                "prev_event": {"uid": "record-0"},
+                "fingerprint": {"value": "derived"},
+                "signatures": [{"algorithm": "ECDSA"}],
+            }
+        ]
+        canonical_bytes, _ = canonicalize_content(event)
+        attestation = json.loads(canonical_bytes)["attestation_list"][0]
+        assert "fingerprint" not in attestation
+        assert "signatures" not in attestation
+        assert attestation["uid"] == "att-1"
+        assert attestation["chain_uid"] == "chain-1"
+        assert attestation["authority_uid"] == "authority-1"
+        assert attestation["prev_event"] == {"uid": "record-0"}
+
+    @pytest.mark.parametrize("line_number", [0, 1])
+    def test_aid_emit_1_post_489_conformance_vectors(self, line_number):
+        fixture = os.path.join(
+            os.path.dirname(__file__), "fixtures", "aid_emit_1_post_489.jsonl"
+        )
+        with open(fixture, encoding="utf-8") as records:
+            event = json.loads(records.readlines()[line_number])
+
+        expected = event["attestation_list"][0]["fingerprint"]["value"]
+        _, actual = canonicalize_content(event)
+        assert actual == expected
+
     def test_empty_unmapped_removed(self):
         event = make_decision_event()
         event["unmapped"] = {"signature_b64": "abc", "signature_key_id": "xyz"}

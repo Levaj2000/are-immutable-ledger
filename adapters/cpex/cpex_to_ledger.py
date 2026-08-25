@@ -44,7 +44,7 @@ STREAM_PREFIX_MAP = {
     "eff-": "effect",
 }
 
-ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
+UNMAPPED_ENVELOPE_KEYS = ("signature_b64", "signature_key_id")
 
 
 class GapDetector:
@@ -120,11 +120,26 @@ def extract_signer_key_reference(event):
 
 
 def canonicalize_content(event):
-    """Strip envelope fields from unmapped, JCS-canonicalize, return (bytes, sha256_hex)."""
+    """Return the AID-EMIT-1 covered bytes and their SHA-256 fingerprint.
+
+    AID-EMIT-1 section 4 excludes the derived fingerprint and signature
+    descriptors from the first attestation entry, plus the transitional raw
+    signature fields under ``unmapped``. Chain identity and position fields,
+    including ``prev_event``, remain covered.
+    """
     content = copy.deepcopy(event)
 
+    attestations = content.get("attestation_list")
+    if (
+        isinstance(attestations, list)
+        and attestations
+        and isinstance(attestations[0], dict)
+    ):
+        attestations[0].pop("fingerprint", None)
+        attestations[0].pop("signatures", None)
+
     unmapped = content.get("unmapped", {})
-    for key in ENVELOPE_KEYS:
+    for key in UNMAPPED_ENVELOPE_KEYS:
         unmapped.pop(key, None)
     if not unmapped:
         content.pop("unmapped", None)
