@@ -23,6 +23,7 @@ from cpex_to_ledger import (
     GapDetector,
     canonicalize_content,
     detect_record_type,
+    extract_stream_stamps,
     extract_agent_id,
     extract_correlation_id,
     extract_idempotency_key,
@@ -408,3 +409,71 @@ class TestProcessLine:
         input_hash = call.kwargs["input_hash"]
         expected = hashlib.sha256(content_bytes).hexdigest()
         assert input_hash == expected
+
+
+class TestStreamStamps:
+    """AID-EMIT-1 §7: stamps ride unmapped."cpex.stream", inside the hash."""
+
+    def _seam_event(self, seq=1, emission=1, epoch=7, with_decision=True):
+        event = make_decision_event()
+        del event["stream_id"]
+        del event["stream_seq"]
+        del event["emission_seq"]
+        event["unmapped"]["cpex.stream"] = {
+            "epoch": epoch,
+            "stream_id": "gw-1/boot-7",
+            "stream_seq": seq,
+            "emission_seq": emission,
+        }
+        if with_decision:
+            event["unmapped"]["cpex.decision"] = {"disposition": "Allowed"}
+        return event
+
+    def test_stamps_read_from_cpex_stream(self):
+        epoch, stream_id, seq, emission = extract_stream_stamps(self._seam_event())
+        assert (epoch, stream_id, seq, emission) == (7, "gw-1/boot-7", 1, 1)
+
+    def test_stamps_fall_back_to_top_level(self):
+        epoch, stream_id, seq, emission = extract_stream_stamps(make_decision_event())
+        assert epoch is None
+        assert stream_id == "dec-boot-001"
+        assert (seq, emission) == (1, 1)
+
+    def test_decision_detected_by_marker_not_prefix(self):
+        assert detect_record_type(self._seam_event()) == "decision"
+
+    def test_seam_record_without_marker_is_skipped(self):
+        assert detect_record_type(self._seam_event(with_decision=False)) is None
+
+    def test_epoch_change_resets_instead_of_alerting(self):
+        detector = GapDetector()
+        assert detector.check("gw-1/boot-7", 41, 41, epoch=1) == []
+        assert detector.check("gw-1/boot-7", 42, 42, epoch=1) == []
+        # host restart: new epoch, sequences restart at 1 — not a gap
+        assert detector.check("gw-1/boot-8", 1, 1, epoch=2) == []
+
+    def test_gap_within_epoch_still_alerts(self):
+        detector = GapDetector()
+        detector.check("gw-1/boot-7", 41, 41, epoch=1)
+        alerts = detector.check("gw-1/boot-7", 43, 43, epoch=1)
+        assert len(alerts) == 1 and "GAP" in alerts[0]
+
+    def test_decision_vectors_end_to_end(self):
+        # Real signed decision records from the reference emitter's
+        # edge-ingest demo: stamps at cpex.stream, decision marker present,
+        # covered bytes reproduce the declared fingerprint.
+        fixture = os.path.join(
+            os.path.dirname(__file__), "fixtures", "aid-emit-1-decision-vectors.jsonl"
+        )
+        with open(fixture) as f:
+            records = [json.loads(line) for line in f if line.strip()]
+        assert len(records) >= 4
+        detector = GapDetector()
+        for record in records:
+            assert detect_record_type(record) == "decision"
+            epoch, stream_id, seq, emission = extract_stream_stamps(record)
+            assert stream_id and seq is not None and epoch is not None
+            assert detector.check(stream_id, seq, emission, epoch=epoch) == []
+            declared = record["attestation_list"][0]["fingerprint"]["value"]
+            _, content_hash = canonicalize_content(record)
+            assert content_hash == declared

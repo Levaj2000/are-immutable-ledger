@@ -39,6 +39,9 @@ from ledger_client import LedgerClient
 SOURCE_ID = "cpex-audit-seam"
 CONTENT_TYPE = "application/ocsf+json"
 
+# Legacy shape only. Current seam records identify a decision by carrying
+# the rendered DecisionLog at unmapped."cpex.decision" (AID-EMIT-1 §9);
+# stream_id names the stream instance (e.g. "gw-1/boot-7"), not a kind.
 STREAM_PREFIX_MAP = {
     "dec-": "decision",
     "eff-": "effect",
@@ -47,36 +50,71 @@ STREAM_PREFIX_MAP = {
 UNMAPPED_ENVELOPE_KEYS = ("signature_b64", "signature_key_id")
 
 
+def extract_stream_stamps(event):
+    """Return (epoch, stream_id, stream_seq, emission_seq) from the record.
+
+    AID-EMIT-1 §7 carries the stamps at unmapped."cpex.stream", inside the
+    hashed bytes. Falls back to top-level fields for pre-seam/synthetic
+    records (no epoch in that shape).
+    """
+    stamps = event.get("unmapped", {}).get("cpex.stream")
+    if isinstance(stamps, dict):
+        return (
+            stamps.get("epoch"),
+            stamps.get("stream_id", ""),
+            stamps.get("stream_seq"),
+            stamps.get("emission_seq"),
+        )
+    return (
+        None,
+        event.get("stream_id", ""),
+        event.get("stream_seq"),
+        event.get("emission_seq"),
+    )
+
+
 class GapDetector:
-    """Tracks stream_seq continuity per stream_id and emission_seq monotonicity."""
+    """Tracks stream_seq continuity and emission_seq monotonicity.
+
+    Both counters are scoped to an epoch (one host process lifetime,
+    AID-EMIT-1 §7): sequences legitimately restart when the epoch changes,
+    so an epoch change resets expectations instead of alerting.
+    """
 
     def __init__(self):
         self._last_seq = {}
-        self._last_emission_seq = -1
+        self._last_emission = {}
 
-    def check(self, stream_id, stream_seq, emission_seq):
+    def check(self, stream_id, stream_seq, emission_seq, epoch=None):
         alerts = []
+        stream_key = (epoch, stream_id)
 
-        if stream_id in self._last_seq:
-            expected = self._last_seq[stream_id] + 1
+        if stream_key in self._last_seq:
+            expected = self._last_seq[stream_key] + 1
             if stream_seq != expected:
                 alerts.append(
-                    f"GAP in {stream_id}: expected stream_seq {expected}, got {stream_seq}"
+                    f"GAP in {stream_id} (epoch {epoch}): "
+                    f"expected stream_seq {expected}, got {stream_seq}"
                 )
 
-        self._last_seq[stream_id] = stream_seq
+        self._last_seq[stream_key] = stream_seq
 
-        if emission_seq is not None and emission_seq <= self._last_emission_seq:
-            alerts.append(
-                f"ORDERING: emission_seq {emission_seq} <= previous {self._last_emission_seq}"
-            )
         if emission_seq is not None:
-            self._last_emission_seq = emission_seq
+            last = self._last_emission.get(epoch, -1)
+            if emission_seq <= last:
+                alerts.append(
+                    f"ORDERING: emission_seq {emission_seq} <= previous {last}"
+                )
+            self._last_emission[epoch] = emission_seq
 
         return alerts
 
 
 def detect_record_type(event):
+    # Current seam shape: a decision record carries the rendered DecisionLog.
+    if "cpex.decision" in event.get("unmapped", {}):
+        return "decision"
+    # Legacy/synthetic shape: kind encoded in a top-level stream_id prefix.
     stream_id = event.get("stream_id", "")
     for prefix, record_type in STREAM_PREFIX_MAP.items():
         if stream_id.startswith(prefix):
@@ -177,12 +215,10 @@ def process_line(client, line, stats, gap_detector, *, write_only=False):
         stats["skipped"] += 1
         return
 
-    stream_id = event.get("stream_id", "")
-    stream_seq = event.get("stream_seq")
-    emission_seq = event.get("emission_seq")
+    epoch, stream_id, stream_seq, emission_seq = extract_stream_stamps(event)
 
     if stream_id and stream_seq is not None:
-        gaps = gap_detector.check(stream_id, stream_seq, emission_seq)
+        gaps = gap_detector.check(stream_id, stream_seq, emission_seq, epoch=epoch)
         for gap_msg in gaps:
             print(f"  WARNING: {gap_msg}", file=sys.stderr)
             stats["gaps_detected"] += 1
