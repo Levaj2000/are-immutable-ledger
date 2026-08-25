@@ -95,7 +95,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway@sha256:bc347d880a3584429bfb91d76d601fee1c63d14bd44e7ce0d7bd311fe276b9d8
+          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway@sha256:9b091975f1653d62cef3b1b71a06c36a2002e6e6d202324f1187cce91abf9cce
           env:
             - name: LEDGER_GRPC_ENDPOINT
               value: "localhost:9092"
