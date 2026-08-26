@@ -1,0 +1,37 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: are-immutable-ledger
+  namespace: immutable-ledger
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: are-immutable-ledger:latest
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: are-ledger-gateway
+  namespace: immutable-ledger
+spec:
+  runPolicy: Serial
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: api/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: are-ledger-gateway:latest

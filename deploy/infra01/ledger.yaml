@@ -95,7 +95,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway:latest
+          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-ledger-gateway@sha256:8203970154658d87858e653d41ae8242c045142a998c6eddbfb93d351db156c2
           env:
             - name: LEDGER_GRPC_ENDPOINT
               value: "localhost:9092"
@@ -133,7 +133,7 @@ spec:
               cpu: 250m
               memory: 128Mi
         - name: ledger-core
-          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-immutable-ledger:latest
+          image: image-registry.openshift-image-registry.svc:5000/immutable-ledger/are-immutable-ledger@sha256:7351b19025b6a7d897890a64f3066121aad60c52f18492ed7eb315504a325ec9
           env:
             - name: DATABASE_URL
               valueFrom:
@@ -161,12 +161,50 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+        - name: tls-proxy
+          image: docker.io/nginxinc/nginx-unprivileged@sha256:0ae19f15f7aac55c1c6d3019009d7d5a83ad1ee2af90ad9f04a89aaab0baf85b
+          ports:
+            - containerPort: 8443
+              name: https
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: tls-proxy-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+              readOnly: true
+            - name: tls-proxy-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: serving-cert
+              mountPath: /var/run/secrets/ledger-tls
+              readOnly: true
+      volumes:
+        - name: tls-proxy-config
+          configMap:
+            name: ledger-tls-proxy
+        - name: serving-cert
+          secret:
+            secretName: ledger-gateway-serving-cert
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: ledger-gateway
   namespace: immutable-ledger
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: ledger-gateway-serving-cert
 spec:
   selector:
     app: ledger-gateway
@@ -174,6 +212,9 @@ spec:
     - port: 28099
       targetPort: 28099
       name: http
+    - port: 443
+      targetPort: 8443
+      name: https
 ---
 apiVersion: v1
 kind: Service
@@ -187,3 +228,61 @@ spec:
     - port: 9092
       targetPort: 9092
       name: grpc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledger-tls-proxy
+  namespace: immutable-ledger
+data:
+  nginx.conf: |
+    pid /tmp/nginx.pid;
+    worker_processes 1;
+    error_log /dev/stderr notice;
+
+    events {
+      worker_connections 256;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      access_log /dev/stdout;
+      include /etc/nginx/conf.d/*.conf;
+    }
+  default.conf: |
+    server {
+      listen 8443 ssl;
+      server_name _;
+      ssl_certificate /var/run/secrets/ledger-tls/tls.crt;
+      ssl_certificate_key /var/run/secrets/ledger-tls/tls.key;
+      ssl_protocols TLSv1.2 TLSv1.3;
+      client_max_body_size 10m;
+
+      location / {
+        proxy_pass http://127.0.0.1:28099;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Request-ID $http_x_request_id;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+      }
+    }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ledger-gateway
+  namespace: immutable-ledger
+spec:
+  to:
+    kind: Service
+    name: ledger-gateway
+    weight: 100
+  port:
+    targetPort: https
+  tls:
+    termination: reencrypt
+    insecureEdgeTerminationPolicy: Redirect
