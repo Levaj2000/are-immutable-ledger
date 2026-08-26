@@ -27,6 +27,7 @@ from cpex_to_ledger import (
     extract_correlation_id,
     extract_idempotency_key,
     extract_signer_key_reference,
+    extract_stream_stamps,
     extract_writer_signature,
     process_line,
 )
@@ -108,6 +109,16 @@ def stats():
 
 
 class TestRecordTypeDetection:
+    def test_decision_from_current_payload_shape(self):
+        event = make_decision_event(stream_id="gw-1/boot-7")
+        event["unmapped"]["cpex.decision"] = {"verdict": "allow", "steps": []}
+        assert detect_record_type(event) == "decision"
+
+    def test_effect_from_current_payload_shape(self):
+        event = make_decision_event(stream_id="gw-1/boot-7")
+        event["unmapped"]["cpex.effect"] = {"effect": "begin"}
+        assert detect_record_type(event) == "effect"
+
     def test_decision_from_dec_prefix(self):
         event = make_decision_event(stream_id="dec-boot-001")
         assert detect_record_type(event) == "decision"
@@ -134,6 +145,25 @@ class TestRecordTypeDetection:
 
 
 class TestFieldExtraction:
+    def test_stream_stamps_from_aid_emit_nested_shape(self):
+        event = make_decision_event()
+        event["unmapped"]["cpex.stream"] = {
+            "epoch": 1755000000000000000,
+            "stream_id": "gw-1/boot-7",
+            "stream_seq": 7,
+            "emission_seq": 42,
+        }
+        assert extract_stream_stamps(event) == (
+            1755000000000000000,
+            "gw-1/boot-7",
+            7,
+            42,
+        )
+
+    def test_stream_stamps_legacy_fallback(self):
+        event = make_decision_event()
+        assert extract_stream_stamps(event) == (None, "dec-boot-001", 1, 1)
+
     def test_agent_id_from_ai_agent_uid(self):
         event = make_decision_event()
         assert extract_agent_id(event) == "agent-alpha-7"
@@ -224,6 +254,17 @@ class TestGapDetection:
         gap_detector.check("dec-001", 1, 5)
         alerts = gap_detector.check("dec-001", 2, 5)
         assert any("ORDERING" in a for a in alerts)
+
+    def test_new_epoch_starts_fresh_sequence_scope(self, gap_detector):
+        gap_detector.check("gw-1", 7, 42, epoch=100)
+        alerts = gap_detector.check("gw-1", 1, 1, epoch=101)
+        assert alerts == []
+
+    def test_same_stream_id_is_independent_across_epochs(self, gap_detector):
+        gap_detector.check("gw-1", 1, 1, epoch=100)
+        gap_detector.check("gw-1", 1, 1, epoch=101)
+        assert gap_detector.check("gw-1", 2, 2, epoch=100) == []
+        assert gap_detector.check("gw-1", 2, 2, epoch=101) == []
 
 
 # --- Content canonicalization ---
@@ -318,6 +359,34 @@ class TestCanonicalization:
 
 
 class TestProcessLine:
+    def test_current_decision_shape_is_written_and_stamps_are_checked(
+        self, mock_client, stats, gap_detector
+    ):
+        event = make_decision_event(stream_id="gw-1/boot-7")
+        event["unmapped"].update(
+            {
+                "cpex.decision": {"verdict": "allow", "steps": []},
+                "cpex.stream": {
+                    "epoch": 1755000000000000000,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 7,
+                    "emission_seq": 42,
+                },
+            }
+        )
+
+        process_line(mock_client, json.dumps(event), stats, gap_detector)
+
+        assert stats["written"] == 1
+        assert stats["skipped"] == 0
+        call = mock_client.issue_receipt.call_args
+        assert call.kwargs["entry_type"] == "cpex.decision"
+
+        event["unmapped"]["cpex.stream"]["stream_seq"] = 9
+        event["unmapped"]["cpex.stream"]["emission_seq"] = 44
+        process_line(mock_client, json.dumps(event), stats, gap_detector)
+        assert stats["gaps_detected"] == 1
+
     def test_decision_calls_issue_receipt(self, mock_client, stats, gap_detector):
         event = make_decision_event()
         line = json.dumps(event)

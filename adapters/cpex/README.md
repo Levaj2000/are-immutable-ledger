@@ -24,7 +24,7 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 | OCSF 6003 Field | Ledger Field | Notes |
 |---|---|---|
-| `stream_id` prefix (`dec-*`/`eff-*`) | `entry_type` | `cpex.decision` or `cpex.effect` |
+| `unmapped."cpex.decision"` / `unmapped."cpex.effect"` | `entry_type` | `cpex.decision` or `cpex.effect`; legacy `dec-*`/`eff-*` top-level stream prefixes remain accepted for replay |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
 | `metadata.correlation_uid` | `correlation_id` | |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
@@ -37,8 +37,10 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 The adapter validates two counters from the CPEX audit seam:
 
-- **`stream_seq`** (per `stream_id`) — completeness claim. Dense within its stream; a gap means a missing record. The adapter alerts on gaps.
-- **`emission_seq`** (global) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
+- **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within its stream and process lifetime; a gap means a missing record. The adapter alerts on gaps.
+- **`emission_seq`** (global within an epoch) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
+
+Current AID-EMIT-1 records carry all four stamps under `unmapped."cpex.stream"`. Top-level stamps remain accepted only for replaying the adapter's legacy input shape.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
 
