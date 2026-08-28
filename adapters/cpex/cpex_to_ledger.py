@@ -5,7 +5,7 @@ Reads CPEX audit records (OCSF 6003/ai_operation, JSONL) from stdin or
 a file and writes them to the immutable ledger. Each record becomes a
 ledger entry with:
 
-  entry_type:           "cpex.decision" or "cpex.effect" (from stream_id prefix)
+  entry_type:           "cpex.decision" or "cpex.effect" (from record payload)
   agent_id:             ai_agent.uid (NOT metadata.uid)
   content:              JCS-canonicalized event bytes (envelope stripped)
   content_type:         "application/ocsf+json"
@@ -39,7 +39,8 @@ from ledger_client import LedgerClient
 SOURCE_ID = "cpex-audit-seam"
 CONTENT_TYPE = "application/ocsf+json"
 
-STREAM_PREFIX_MAP = {
+# Compatibility for records emitted before the AID-EMIT-1 nested shape.
+LEGACY_STREAM_PREFIX_MAP = {
     "dec-": "decision",
     "eff-": "effect",
 }
@@ -52,36 +53,67 @@ class GapDetector:
 
     def __init__(self):
         self._last_seq = {}
-        self._last_emission_seq = -1
+        self._last_emission_seq = {}
 
-    def check(self, stream_id, stream_seq, emission_seq):
+    def check(self, stream_id, stream_seq, emission_seq, epoch=None):
         alerts = []
+        stream_key = (epoch, stream_id)
 
-        if stream_id in self._last_seq:
-            expected = self._last_seq[stream_id] + 1
+        if stream_key in self._last_seq:
+            expected = self._last_seq[stream_key] + 1
             if stream_seq != expected:
                 alerts.append(
                     f"GAP in {stream_id}: expected stream_seq {expected}, got {stream_seq}"
                 )
 
-        self._last_seq[stream_id] = stream_seq
+        self._last_seq[stream_key] = stream_seq
 
-        if emission_seq is not None and emission_seq <= self._last_emission_seq:
+        previous_emission_seq = self._last_emission_seq.get(epoch, -1)
+        if emission_seq is not None and emission_seq <= previous_emission_seq:
             alerts.append(
-                f"ORDERING: emission_seq {emission_seq} <= previous {self._last_emission_seq}"
+                f"ORDERING: emission_seq {emission_seq} <= previous {previous_emission_seq}"
             )
         if emission_seq is not None:
-            self._last_emission_seq = emission_seq
+            self._last_emission_seq[epoch] = emission_seq
 
         return alerts
 
 
 def detect_record_type(event):
+    unmapped = event.get("unmapped", {})
+    if isinstance(unmapped, dict):
+        if "cpex.decision" in unmapped:
+            return "decision"
+        if "cpex.effect" in unmapped:
+            return "effect"
+
+    # Accept the pre-AID-EMIT-1 shape for offline replay compatibility.
     stream_id = event.get("stream_id", "")
-    for prefix, record_type in STREAM_PREFIX_MAP.items():
+    for prefix, record_type in LEGACY_STREAM_PREFIX_MAP.items():
         if stream_id.startswith(prefix):
             return record_type
     return None
+
+
+def extract_stream_stamps(event):
+    """Extract AID-EMIT-1 section 7 stamps, with legacy fallback."""
+    unmapped = event.get("unmapped", {})
+    if isinstance(unmapped, dict):
+        stream = unmapped.get("cpex.stream")
+        if isinstance(stream, dict):
+            return (
+                stream.get("epoch"),
+                stream.get("stream_id", ""),
+                stream.get("stream_seq"),
+                stream.get("emission_seq"),
+            )
+
+    return (
+        event.get("epoch"),
+        event.get("stream_id", ""),
+        event.get("stream_seq"),
+        event.get("emission_seq"),
+    )
 
 
 def extract_agent_id(event):
@@ -177,12 +209,10 @@ def process_line(client, line, stats, gap_detector, *, write_only=False):
         stats["skipped"] += 1
         return
 
-    stream_id = event.get("stream_id", "")
-    stream_seq = event.get("stream_seq")
-    emission_seq = event.get("emission_seq")
+    epoch, stream_id, stream_seq, emission_seq = extract_stream_stamps(event)
 
     if stream_id and stream_seq is not None:
-        gaps = gap_detector.check(stream_id, stream_seq, emission_seq)
+        gaps = gap_detector.check(stream_id, stream_seq, emission_seq, epoch)
         for gap_msg in gaps:
             print(f"  WARNING: {gap_msg}", file=sys.stderr)
             stats["gaps_detected"] += 1
