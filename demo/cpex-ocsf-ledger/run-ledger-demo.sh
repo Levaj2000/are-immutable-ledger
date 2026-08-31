@@ -57,6 +57,23 @@ echo "$IMPORT_OUTPUT" | grep -Eq "Written: 6[[:space:]]+Errors: 0.*Gaps: 0" || {
 echo "Verifying the ledger's durable cpex chains..."
 python3 "$REPO_DIR/proof-explorer/proof.py" verify --entry-type cpex
 
+echo "Verifying conversation and agent correlation across the restart..."
+RUN_OUTPUT="$(python3 "$REPO_DIR/proof-explorer/proof.py" query \
+  --correlation-id run-4bf92f35)"
+echo "$RUN_OUTPUT"
+echo "$RUN_OUTPUT" | grep -q "6 entries returned" || {
+  echo "expected run-4bf92f35 to correlate all six records" >&2
+  exit 1
+}
+
+AGENT_OUTPUT="$(python3 "$REPO_DIR/proof-explorer/proof.py" query \
+  --agent-id agent-7)"
+echo "$AGENT_OUTPUT"
+echo "$AGENT_OUTPUT" | grep -q "6 entries returned" || {
+  echo "expected agent-7 on all six records" >&2
+  exit 1
+}
+
 echo "Checking the signed request join key remains in retained content..."
 REQUEST_MATCHES="$(python3 - "$RECORDS" <<'PY'
 import json
@@ -78,5 +95,5 @@ PY
 }
 echo "  request join key corr-7f3e2a91 retained on exactly one signed record"
 
-echo "PASS: six signed records imported; epoch-aware density and ledger chains verified."
+echo "PASS: six signed records imported; identity, correlation, density, and ledger chains verified."
 echo "AID-EMIT-1 public key retained at: $PUBLIC_KEY"

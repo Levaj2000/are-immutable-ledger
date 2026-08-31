@@ -14,7 +14,8 @@ After that runner reports `PASS`, hand its output directory to the ledger:
 
 The wrapper starts the local ledger stack if needed, imports all six records,
 checks that the two epoch-scoped sequences are gap-free, verifies the ledger's
-`cpex.*` hash chains, and confirms that the signed request join key
+`cpex.*` hash chains, asserts that `agent-7` and conversation
+`run-4bf92f35` span all six entries, and confirms that the signed request join key
 `corr-7f3e2a91` remains on exactly one retained record. Conversation-level
 `metadata.correlation_uid` maps to the ledger's `correlation_id`; the
 per-request key is not overloaded into that field.
