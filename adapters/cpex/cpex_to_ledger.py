@@ -10,7 +10,7 @@ ledger entry with:
   content:              JCS-canonicalized event bytes (envelope stripped)
   content_type:         "application/ocsf+json"
   source_id:            "cpex-audit-seam"
-  correlation_id:       unmapped."cmf.request.request_id" (metadata fallback)
+  correlation_id:       metadata.correlation_uid (conversation/run scope)
   idempotency_key:      metadata.uid (the record ID)
   input_hash:           SHA-256 of canonical content
   writer_signature:     unmapped.signature_b64 (base64-decoded)
@@ -125,12 +125,6 @@ def extract_agent_id(event):
 
 
 def extract_correlation_id(event):
-    unmapped = event.get("unmapped", {})
-    if isinstance(unmapped, dict):
-        request = unmapped.get("cmf.request.request_id")
-        if isinstance(request, str) and request:
-            return request
-
     metadata = event.get("metadata", {})
     return metadata.get("correlation_uid", "")
 

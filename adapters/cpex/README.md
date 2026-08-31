@@ -26,7 +26,7 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 |---|---|---|
 | `unmapped."cpex.decision"` / `unmapped."cpex.effect"` | `entry_type` | `cpex.decision` or `cpex.effect`; legacy `dec-*`/`eff-*` top-level stream prefixes remain accepted for replay |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
-| `unmapped."cmf.request.request_id"` | `correlation_id` | Signed per-request join key used by draw receipts; falls back to `metadata.correlation_uid` for legacy/run-level records |
+| `metadata.correlation_uid` | `correlation_id` | Conversation/run correlation; deliberately not the per-request identifier |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
 | JCS-canonicalized event | `content` | Envelope fields stripped |
 | SHA-256 of canonical content | `input_hash` | |
@@ -41,6 +41,11 @@ The adapter validates two counters from the CPEX audit seam:
 - **`emission_seq`** (global within an epoch) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
 
 Current AID-EMIT-1 records carry all four stamps under `unmapped."cpex.stream"`. Top-level stamps remain accepted only for replaying the adapter's legacy input shape.
+
+The signed per-request join key remains at
+`unmapped."cmf.request.request_id"` inside `content`. It is not overloaded into
+the conversation-scoped `correlation_id`; a separately indexed ledger request
+field requires its own API and storage contract.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
 

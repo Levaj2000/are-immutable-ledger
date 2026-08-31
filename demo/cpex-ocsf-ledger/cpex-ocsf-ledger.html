@@ -446,7 +446,7 @@
               <li>Export the signed decision bundle from the ledger.</li>
               <li>Disable networking and run Jeff’s conformance validator.</li>
               <li>Verify fingerprints, DSSE, chain linkage, and density within each <code>(epoch, stream_id)</code>.</li>
-              <li>Query <code>plugin_panic</code>, <code>deny_ignored</code>, <code>Modified</code>, and the request join key.</li>
+              <li>Query <code>plugin_panic</code>, <code>deny_ignored</code>, and <code>Modified</code>; confirm the separate request join key remains in the signed record.</li>
             </ol>
             <p style="margin-top:14px"><code>python3 scripts/aid_emit1_validator.py records.ndjson --key pubkey.pem</code></p>
             <p class="small quiet" style="margin-top:10px">No <code>--strict-gaps</code> on stage: findings remain visible without turning an honestly scoped boundary into a failed demo.</p>

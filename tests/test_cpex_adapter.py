@@ -181,12 +181,12 @@ class TestFieldExtraction:
         event = {}
         assert extract_agent_id(event) == "unknown"
 
-    def test_correlation_id_from_request_join_key(self):
+    def test_request_join_key_does_not_replace_conversation_correlation(self):
         event = make_decision_event()
         event["unmapped"]["cmf.request.request_id"] = "request-draw-42"
-        assert extract_correlation_id(event) == "request-draw-42"
+        assert extract_correlation_id(event) == "trace-abc-123"
 
-    def test_correlation_id_falls_back_to_metadata(self):
+    def test_correlation_id_from_metadata(self):
         event = make_decision_event()
         assert extract_correlation_id(event) == "trace-abc-123"
 
