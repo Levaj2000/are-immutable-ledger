@@ -344,6 +344,7 @@
         <span class="tag"><span class="dot"></span>Ledger covered bytes aligned</span>
         <span class="tag"><span class="dot"></span>Ledger current stream shape merged</span>
         <span class="tag"><span class="dot"></span>AI-Identity #499 runner merged</span>
+        <span class="tag"><span class="dot"></span>Rev 2 · 6/6 signatures verified</span>
         <span class="tag"><span class="dot pending"></span>Beat 06 panic harness pending</span>
         <span class="tag"><span class="dot pending"></span>Praxis Policy #11/#12 pending</span>
       </div>
@@ -384,7 +385,7 @@
 
         <div class="boundary">
           <strong>Honest boundary</strong>
-          <p>The merged AI-Identity #499 runner produces six signed NDJSON records across a real SIGKILL and two epochs, then hands the bundle to the ledger wrapper. OAuth <code>begin_effect</code> / recovery remains distinct from a class-correct OCSF effect event until Praxis Policy #12 and the plugin settle that contract. The <code>plugin_panic</code> core path is live on #166; beat 06 remains amber because its record is staged rather than driven by a panicking plugin.</p>
+          <p>Rev 2 is accepted end to end: six DSSE signatures verify, <code>agent-7</code> and conversation <code>run-4bf92f35</code> survive a real SIGKILL and span both epochs, and request <code>corr-7f3e2a91</code> remains separately bound to Beat 05. OAuth <code>begin_effect</code> / recovery remains distinct from a class-correct OCSF effect event until Praxis Policy #12 and the plugin settle that contract. The <code>plugin_panic</code> core path is live on #166; Beat 06 remains amber because its record is staged rather than driven by a panicking plugin.</p>
         </div>
       </div>
     </section>
@@ -446,6 +447,7 @@
               <li>Export the signed decision bundle from the ledger.</li>
               <li>Disable networking and run Jeff’s conformance validator.</li>
               <li>Verify fingerprints, DSSE, chain linkage, and density within each <code>(epoch, stream_id)</code>.</li>
+              <li>Show <code>agent-7</code> and <code>run-4bf92f35</code> returning all six records across the restart.</li>
               <li>Query <code>plugin_panic</code>, <code>deny_ignored</code>, and <code>Modified</code>; confirm the separate request join key remains in the signed record.</li>
             </ol>
             <p style="margin-top:14px"><code>python3 scripts/aid_emit1_validator.py records.ndjson --key pubkey.pem</code></p>
@@ -500,13 +502,13 @@
           <article class="owner">
             <h3>Jonathan · Immutable ledger</h3>
             <p>Own ingestion, durable storage, epoch-aware gap detection, receipts, queries, and the repeatable demo runner.</p>
-            <ul><li>No current-shape records skipped</li><li>V3 chain verification</li><li>Join-key query</li><li>One-command reproducibility</li></ul>
+            <ul><li>No current-shape records skipped</li><li>V3 chain verification</li><li>Conversation and agent queries</li><li>Request-key retention</li><li>One-command reproducibility</li></ul>
           </article>
         </div>
 
         <div class="gates" aria-label="Definition of done checklist">
-          <label class="gate"><input type="checkbox" data-gate><h3>Pin exact revisions</h3><p>Print verbatim: <code>seam cpex#166 @ 386710a · rustc 1.96.1 · 33/33 port tests green</code>. Also print the ledger and AID-EMIT-1 revisions.</p></label>
-          <label class="gate"><input type="checkbox" data-gate><h3>Produce deterministic evidence</h3><p>All five <code>decision_sink_demo</code> records, the epoch-scoped effect-recovery sequence, and beat 06 when its panic harness is available match the documented outcomes.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Pin exact revisions</h3><p>Print verbatim: <code>seam cpex#166 @ 5a253d4 · rustc 1.96.1 · 33/33 port tests green</code>. Also print the ledger and AID-EMIT-1 revisions.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Produce deterministic evidence</h3><p>Rev 2 passes four content hashes, 6/6 DSSE signatures, two independently dense epochs, one valid ledger chain, six-record agent/run queries, and one Beat 05 request-key match.</p></label>
           <label class="gate"><input type="checkbox" data-gate><h3>Verify without services</h3><p>Fingerprints, signatures, sequence density, and ledger chains verify from exported bundles with networking disabled.</p></label>
           <label class="gate"><input type="checkbox" data-gate><h3>Keep the effect boundary explicit</h3><p>Recovery is shown from the effect WAL until Policy #12 defines and implements the OCSF effect event.</p></label>
           <label class="gate"><input type="checkbox" data-gate><h3>Repeat on PPE</h3><p>After Policy #11/#12 land, swap the dependency and publish a side-by-side conformance report; no silent compatibility shim.</p></label>
