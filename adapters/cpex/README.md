@@ -37,10 +37,16 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 The adapter validates two counters from the CPEX audit seam:
 
-- **`stream_seq`** (per `stream_id`) — completeness claim. Dense within its stream; a gap means a missing record. The adapter alerts on gaps.
+- **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within an epoch of its stream; a gap means a missing record. The adapter alerts on gaps. A CPEX restart opens a new epoch and legitimately resets the counter — that discontinuity is expected and is not a gap.
 - **`emission_seq`** (global) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
+
+**Known limitation:** `GapDetector` keys continuity on `stream_id` alone, so a stream that
+crosses an epoch boundary — a CPEX restart mid-run — is reported as a gap and fails
+`--strict-gaps`, even though the reset is expected. Keying on `(epoch, stream_id)` is
+pending confirmation of the epoch field's name and location in the seam record (cpex#166).
+Until then, do not run `--strict-gaps` across a restart.
 
 ## Content Canonicalization
 
@@ -48,4 +54,4 @@ Envelope fields (`unmapped.signature_b64`, `unmapped.signature_key_id`, `unmappe
 
 ## Production Path
 
-This Python CLI adapter is for testing and offline replay. The production integration is a native Rust gRPC client inside the CPEX ocsf-audit plugin, calling the ledger directly as a sink (see `docs/cpex-integration-draft.md`).
+This Python CLI adapter is for testing and offline replay. The production integration is a native Rust gRPC client inside the CPEX ocsf-audit plugin, calling the ledger directly as a sink.
