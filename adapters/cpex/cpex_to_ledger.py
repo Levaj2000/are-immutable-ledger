@@ -16,8 +16,10 @@ ledger entry with:
   writer_signature:     unmapped.signature_b64 (base64-decoded)
   signer_key_reference: unmapped.signature_key_id
 
-Gap detection: validates stream_seq continuity per stream_id and
-emission_seq monotonicity. Alerts on gaps but still writes records.
+Gap detection: validates stream_seq continuity per (epoch, stream_id)
+and emission_seq monotonicity. Alerts on gaps but still writes records.
+A CPEX restart opens a new epoch and resets stream_seq; that is reported
+as an epoch change, not a gap.
 
 Usage:
   python cpex_to_ledger.py --file /var/log/cpex-audit.jsonl
@@ -47,24 +49,62 @@ STREAM_PREFIX_MAP = {
 ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
 
 
+STREAM_STAMP_KEY = "cpex.stream"
+
+
+def extract_stream_stamps(event):
+    """Return (epoch, stream_id, stream_seq, emission_seq).
+
+    The plugin's OCSF records carry the seam's completeness/ordering stamps
+    under unmapped["cpex.stream"], inside the hashed bytes. Older seam output
+    carried them at the top level, so fall back to that.
+    """
+    stamps = event.get("unmapped", {}).get(STREAM_STAMP_KEY)
+    if not isinstance(stamps, dict):
+        stamps = event
+    return (
+        stamps.get("epoch"),
+        stamps.get("stream_id", ""),
+        stamps.get("stream_seq"),
+        stamps.get("emission_seq"),
+    )
+
+
 class GapDetector:
-    """Tracks stream_seq continuity per stream_id and emission_seq monotonicity."""
+    """Tracks stream_seq continuity per (epoch, stream_id) and emission_seq
+    monotonicity."""
 
     def __init__(self):
         self._last_seq = {}
+        self._last_epoch = {}
         self._last_emission_seq = -1
+        self._notes = []
 
-    def check(self, stream_id, stream_seq, emission_seq):
+    def pop_notes(self):
+        """Drain informational notes (epoch changes) recorded since the last call."""
+        notes, self._notes = self._notes, []
+        return notes
+
+    def check(self, stream_id, stream_seq, emission_seq, epoch=None):
         alerts = []
 
-        if stream_id in self._last_seq:
-            expected = self._last_seq[stream_id] + 1
+        previous_epoch = self._last_epoch.get(stream_id, epoch)
+        if previous_epoch != epoch:
+            self._notes.append(
+                f"EPOCH CHANGE in {stream_id}: {previous_epoch} -> {epoch}; "
+                f"stream_seq resets to {stream_seq} (expected, not a gap)"
+            )
+        self._last_epoch[stream_id] = epoch
+
+        key = (epoch, stream_id)
+        if key in self._last_seq:
+            expected = self._last_seq[key] + 1
             if stream_seq != expected:
                 alerts.append(
                     f"GAP in {stream_id}: expected stream_seq {expected}, got {stream_seq}"
                 )
 
-        self._last_seq[stream_id] = stream_seq
+        self._last_seq[key] = stream_seq
 
         if emission_seq is not None and emission_seq <= self._last_emission_seq:
             alerts.append(
@@ -162,12 +202,12 @@ def process_line(client, line, stats, gap_detector, *, write_only=False):
         stats["skipped"] += 1
         return
 
-    stream_id = event.get("stream_id", "")
-    stream_seq = event.get("stream_seq")
-    emission_seq = event.get("emission_seq")
+    epoch, stream_id, stream_seq, emission_seq = extract_stream_stamps(event)
 
     if stream_id and stream_seq is not None:
-        gaps = gap_detector.check(stream_id, stream_seq, emission_seq)
+        gaps = gap_detector.check(stream_id, stream_seq, emission_seq, epoch=epoch)
+        for note in gap_detector.pop_notes():
+            print(f"  NOTE: {note}", file=sys.stderr)
         for gap_msg in gaps:
             print(f"  WARNING: {gap_msg}", file=sys.stderr)
             stats["gaps_detected"] += 1

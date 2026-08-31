@@ -35,12 +35,26 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 ## Gap Detection
 
+The stamps ride under `unmapped."cpex.stream"` (`epoch` / `stream_id` / `stream_seq` /
+`emission_seq`), inside the hashed bytes. Top-level fields are accepted as a fallback
+for older seam output.
+
 The adapter validates two counters from the CPEX audit seam:
 
-- **`stream_seq`** (per `stream_id`) — completeness claim. Dense within its stream; a gap means a missing record. The adapter alerts on gaps.
+- **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within an epoch of its stream; a gap means a missing record. The adapter alerts on gaps. A CPEX restart opens a new epoch and legitimately resets the counter — that discontinuity is expected and is not a gap.
 - **`emission_seq`** (global) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
+
+The reset is reported on stderr as
+`NOTE: EPOCH CHANGE in <stream_id>: <old> -> <new>` and does **not** count toward
+`gaps_detected`, so `--strict-gaps` stays usable across a restart.
+
+**Known limitation:** `detect_record_type` reads `stream_id` from the top level of the
+event, but the plugin's OCSF records carry it under `unmapped."cpex.stream"`, with
+gateway/boot ids (`gw-1/boot-7`) rather than the `dec-*` / `eff-*` prefixes this adapter
+keys `entry_type` on. Records in that shape are skipped rather than written. How
+`entry_type` should be derived from them is still open.
 
 ## Content Canonicalization
 
@@ -48,4 +62,4 @@ Envelope fields (`unmapped.signature_b64`, `unmapped.signature_key_id`, `unmappe
 
 ## Production Path
 
-This Python CLI adapter is for testing and offline replay. The production integration is a native Rust gRPC client inside the CPEX ocsf-audit plugin, calling the ledger directly as a sink (see `docs/cpex-integration-draft.md`).
+This Python CLI adapter is for testing and offline replay. The production integration is a native Rust gRPC client inside the CPEX ocsf-audit plugin, calling the ledger directly as a sink.
