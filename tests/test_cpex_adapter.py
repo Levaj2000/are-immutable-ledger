@@ -364,6 +364,48 @@ class TestCanonicalization:
 
 
 class TestProcessLine:
+    def test_restart_uses_new_epoch_and_attestation_chain_without_false_gap(
+        self, mock_client, stats, gap_detector
+    ):
+        first = make_decision_event(stream_id="gw-1/boot-7")
+        first["metadata"]["uid"] = "producer-a-000005"
+        first["attestation_list"] = [{"chain_uid": "producer-a"}]
+        first["unmapped"].update(
+            {
+                "cpex.decision": {"verdict": "allow", "steps": []},
+                "cpex.stream": {
+                    "epoch": 1755648000000000000,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 45,
+                    "emission_seq": 45,
+                },
+            }
+        )
+        restarted = make_decision_event(stream_id="gw-1/boot-7")
+        restarted["metadata"]["uid"] = "producer-b-000001"
+        restarted["attestation_list"] = [{"chain_uid": "producer-b"}]
+        restarted["unmapped"].update(
+            {
+                "cpex.decision": {"verdict": "deny", "steps": []},
+                "cpex.stream": {
+                    "epoch": 1755649000000000000,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 1,
+                    "emission_seq": 1,
+                },
+            }
+        )
+
+        process_line(mock_client, json.dumps(first), stats, gap_detector)
+        process_line(mock_client, json.dumps(restarted), stats, gap_detector)
+
+        assert stats["written"] == 2
+        assert stats["gaps_detected"] == 0
+        calls = mock_client.issue_receipt.call_args_list
+        assert calls[0].kwargs["entry_type"] == calls[1].kwargs["entry_type"] == "cpex.decision"
+        assert calls[0].kwargs["idempotency_key"] == "producer-a-000005"
+        assert calls[1].kwargs["idempotency_key"] == "producer-b-000001"
+
     def test_current_decision_shape_is_written_and_stamps_are_checked(
         self, mock_client, stats, gap_detector
     ):

@@ -343,6 +343,7 @@
         <span class="tag"><span class="dot"></span>OCSF decision sink verified</span>
         <span class="tag"><span class="dot"></span>Ledger covered bytes aligned</span>
         <span class="tag"><span class="dot"></span>Ledger current stream shape merged</span>
+        <span class="tag"><span class="dot"></span>AI-Identity #499 runner merged</span>
         <span class="tag"><span class="dot pending"></span>Beat 06 panic harness pending</span>
         <span class="tag"><span class="dot pending"></span>Praxis Policy #11/#12 pending</span>
       </div>
@@ -383,7 +384,7 @@
 
         <div class="boundary">
           <strong>Honest boundary</strong>
-          <p>The five existing <code>decision_sink_demo</code> records traverse the full CPEX → OCSF → ledger path today. OAuth <code>begin_effect</code> / recovery is demonstrated from CPEX’s effect WAL separately until Praxis Policy #12 and the plugin settle a class-correct OCSF effect event. The <code>plugin_panic</code> core path is live on #166; beat 06 remains amber until its end-to-end example harness lands.</p>
+          <p>The merged AI-Identity #499 runner produces six signed NDJSON records across a real SIGKILL and two epochs, then hands the bundle to the ledger wrapper. OAuth <code>begin_effect</code> / recovery remains distinct from a class-correct OCSF effect event until Praxis Policy #12 and the plugin settle that contract. The <code>plugin_panic</code> core path is live on #166; beat 06 remains amber because its record is staged rather than driven by a panicking plugin.</p>
         </div>
       </div>
     </section>
@@ -525,6 +526,7 @@
           <a class="source" href="https://github.com/praxis-proxy/policy/issues/12">Praxis Policy #12 · OCSF sink</a>
           <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/docs/specs/aid-emit-1.md">AID-EMIT-1</a>
           <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/scripts/aid_emit1_validator.py">AID-EMIT-1 offline validator</a>
+          <a class="source" href="https://github.com/Levaj2000/AI-Identity/pull/499">AI-Identity #499 demo runner</a>
           <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/integrations/cpex-ocsf-audit/PRAXIS-PORT-PLAN.md">Jeff’s PPE port plan</a>
           <a class="source" href="https://github.com/jkershawrh/are-immutable-ledger/pull/14">Ledger PR #14 · stream shape merged</a>
           <a class="source" href="https://github.com/jkershawrh/are-immutable-ledger">Immutable ledger</a>
