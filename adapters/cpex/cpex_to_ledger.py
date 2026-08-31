@@ -55,6 +55,9 @@ RECORD_TYPE_KEYS = (
     ("cpex.effect", "effect"),
 )
 
+# The per-request join key a signed draw receipt reconciles against.
+REQUEST_ID_KEY = "cmf.request.request_id"
+
 ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
 
 
@@ -156,6 +159,20 @@ def extract_agent_id(event):
 
 
 def extract_correlation_id(event):
+    """Prefer the per-request join key, falling back to the conversation key.
+
+    A signed draw receipt names the request's correlation id, and the plugin
+    carries that at unmapped["cmf.request.request_id"] — deliberately not in
+    metadata.correlation_uid, which it reserves for an id that is stable
+    across events. The ledger's correlation_id is the field a receipt-in-hand
+    is queried against, so the per-request id wins where a record has one.
+    """
+    unmapped = event.get("unmapped")
+    if isinstance(unmapped, dict):
+        request_id = unmapped.get(REQUEST_ID_KEY)
+        if request_id:
+            return request_id
+
     metadata = event.get("metadata", {})
     return metadata.get("correlation_uid", "")
 

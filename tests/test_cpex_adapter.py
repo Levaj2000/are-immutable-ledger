@@ -547,3 +547,55 @@ class TestRecordTypeDiscriminator:
         assert stats["written"] == 1
         assert stats["skipped"] == 0
         assert mock_client.issue_receipt.call_args.kwargs["entry_type"] == "cpex.decision"
+
+
+# --- correlation_id: the draw-receipt join key ---
+
+
+class TestCorrelationJoinKey:
+    def test_request_id_wins_over_conversation_key(self):
+        event = {
+            "metadata": {"correlation_uid": "conv-9"},
+            "unmapped": {"cmf.request.request_id": "corr-7f3e2a91"},
+        }
+        assert extract_correlation_id(event) == "corr-7f3e2a91"
+
+    def test_falls_back_to_conversation_key(self):
+        event = {"metadata": {"correlation_uid": "conv-9"}, "unmapped": {}}
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_empty_request_id_falls_back(self):
+        event = {
+            "metadata": {"correlation_uid": "conv-9"},
+            "unmapped": {"cmf.request.request_id": ""},
+        }
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_neither_present_is_empty(self):
+        assert extract_correlation_id({"metadata": {}, "unmapped": {}}) == ""
+
+    def test_non_dict_unmapped_does_not_raise(self):
+        event = {"metadata": {"correlation_uid": "conv-9"}, "unmapped": "nope"}
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_mandate_draw_reaches_the_ledger_with_the_join_key(
+        self, mock_client, stats, gap_detector
+    ):
+        event = {
+            "class_uid": 6003,
+            "metadata": {"uid": "rec-5", "version": "1.9.0"},
+            "ai_agent": {"uid": "agent-7"},
+            "unmapped": {
+                "cpex.decision": {"verdict": "allow", "steps": []},
+                "cmf.request.request_id": "corr-7f3e2a91",
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 45,
+                    "emission_seq": 45,
+                },
+            },
+        }
+        process_line(mock_client, json.dumps(event), stats, gap_detector)
+        assert stats["written"] == 1
+        assert mock_client.issue_receipt.call_args.kwargs["correlation_id"] == "corr-7f3e2a91"
