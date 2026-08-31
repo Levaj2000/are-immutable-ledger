@@ -480,3 +480,122 @@ class TestEpochBoundaries:
         process_line(mock_client, event_with_stamps("r-2", EPOCH_B, 1, 44), stats, gap_detector)
         assert stats["gaps_detected"] == 0
         assert stats["written"] == 2
+
+
+# --- Record-type detection on the real record shape ---
+
+
+class TestRecordTypeDiscriminator:
+    def test_decision_record_detected_by_unmapped_key(self):
+        event = {"unmapped": {"cpex.decision": {"verdict": "allow", "steps": []}}}
+        assert detect_record_type(event) == "decision"
+
+    def test_effect_record_detected_by_unmapped_key(self):
+        event = {"unmapped": {"cpex.effect": {}}}
+        assert detect_record_type(event) == "effect"
+
+    def test_gateway_boot_stream_id_no_longer_skipped(self):
+        event = {
+            "class_uid": 6003,
+            "unmapped": {
+                "cpex.decision": {"verdict": "deny", "steps": []},
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 41,
+                    "emission_seq": 41,
+                },
+            },
+        }
+        assert detect_record_type(event) == "decision"
+
+    def test_unmapped_key_wins_over_stream_prefix(self):
+        event = {
+            "stream_id": "eff-boot-001",
+            "unmapped": {"cpex.decision": {"verdict": "allow", "steps": []}},
+        }
+        assert detect_record_type(event) == "decision"
+
+    def test_top_level_prefix_still_works(self):
+        assert detect_record_type({"stream_id": "dec-boot-001"}) == "decision"
+        assert detect_record_type({"stream_id": "eff-boot-001"}) == "effect"
+
+    def test_unrelated_record_is_skipped(self):
+        event = {"class_uid": 6003, "unmapped": {"cmf.security.labels": ["PII"]}}
+        assert detect_record_type(event) is None
+
+    def test_non_dict_unmapped_does_not_raise(self):
+        assert detect_record_type({"unmapped": "not-an-object"}) is None
+
+    def test_real_shaped_decision_record_is_written(self, mock_client, stats, gap_detector):
+        event = {
+            "class_uid": 6003,
+            "class_name": "AI Operation",
+            "metadata": {"uid": "rec-1", "version": "1.9.0"},
+            "ai_agent": {"uid": "agent-7"},
+            "unmapped": {
+                "cpex.decision": {"verdict": "allow", "steps": []},
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 41,
+                    "emission_seq": 41,
+                },
+            },
+        }
+        process_line(mock_client, json.dumps(event), stats, gap_detector)
+        assert stats["written"] == 1
+        assert stats["skipped"] == 0
+        assert mock_client.issue_receipt.call_args.kwargs["entry_type"] == "cpex.decision"
+
+
+# --- correlation_id: the draw-receipt join key ---
+
+
+class TestCorrelationJoinKey:
+    def test_request_id_wins_over_conversation_key(self):
+        event = {
+            "metadata": {"correlation_uid": "conv-9"},
+            "unmapped": {"cmf.request.request_id": "corr-7f3e2a91"},
+        }
+        assert extract_correlation_id(event) == "corr-7f3e2a91"
+
+    def test_falls_back_to_conversation_key(self):
+        event = {"metadata": {"correlation_uid": "conv-9"}, "unmapped": {}}
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_empty_request_id_falls_back(self):
+        event = {
+            "metadata": {"correlation_uid": "conv-9"},
+            "unmapped": {"cmf.request.request_id": ""},
+        }
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_neither_present_is_empty(self):
+        assert extract_correlation_id({"metadata": {}, "unmapped": {}}) == ""
+
+    def test_non_dict_unmapped_does_not_raise(self):
+        event = {"metadata": {"correlation_uid": "conv-9"}, "unmapped": "nope"}
+        assert extract_correlation_id(event) == "conv-9"
+
+    def test_mandate_draw_reaches_the_ledger_with_the_join_key(
+        self, mock_client, stats, gap_detector
+    ):
+        event = {
+            "class_uid": 6003,
+            "metadata": {"uid": "rec-5", "version": "1.9.0"},
+            "ai_agent": {"uid": "agent-7"},
+            "unmapped": {
+                "cpex.decision": {"verdict": "allow", "steps": []},
+                "cmf.request.request_id": "corr-7f3e2a91",
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 45,
+                    "emission_seq": 45,
+                },
+            },
+        }
+        process_line(mock_client, json.dumps(event), stats, gap_detector)
+        assert stats["written"] == 1
+        assert mock_client.issue_receipt.call_args.kwargs["correlation_id"] == "corr-7f3e2a91"

@@ -24,14 +24,19 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 | OCSF 6003 Field | Ledger Field | Notes |
 |---|---|---|
-| `stream_id` prefix (`dec-*`/`eff-*`) | `entry_type` | `cpex.decision` or `cpex.effect` |
+| `unmapped."cpex.decision"` present | `entry_type` | `cpex.decision`; `unmapped."cpex.effect"` reserved for `on_effect`. Falls back to a `dec-*`/`eff-*` prefixed top-level `stream_id` for older seam output |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
-| `metadata.correlation_uid` | `correlation_id` | |
+| `unmapped."cmf.request.request_id"` | `correlation_id` | The join key a signed draw receipt reconciles against. Falls back to `metadata.correlation_uid` (conversation-scoped) when a record carries no request id |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
 | JCS-canonicalized event | `content` | Envelope fields stripped |
 | SHA-256 of canonical content | `input_hash` | |
 | `unmapped.signature_b64` | `writer_signature` | Base64-decoded |
 | `unmapped.signature_key_id` | `signer_key_reference` | |
+
+The plugin sets `metadata.correlation_uid` only for correlations that are stable across
+events, so most decision records carry none; the per-request id is what a receipt names.
+Mapping the request id into `correlation_id` is what lets `receipt.correlation_id` be
+queried directly against the ledger.
 
 ## Gap Detection
 
@@ -49,12 +54,6 @@ Gap detection is **alert-and-continue** — records are still written to the led
 The reset is reported on stderr as
 `NOTE: EPOCH CHANGE in <stream_id>: <old> -> <new>` and does **not** count toward
 `gaps_detected`, so `--strict-gaps` stays usable across a restart.
-
-**Known limitation:** `detect_record_type` reads `stream_id` from the top level of the
-event, but the plugin's OCSF records carry it under `unmapped."cpex.stream"`, with
-gateway/boot ids (`gw-1/boot-7`) rather than the `dec-*` / `eff-*` prefixes this adapter
-keys `entry_type` on. Records in that shape are skipped rather than written. How
-`entry_type` should be derived from them is still open.
 
 ## Content Canonicalization
 

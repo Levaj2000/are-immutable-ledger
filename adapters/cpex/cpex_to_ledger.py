@@ -46,6 +46,18 @@ STREAM_PREFIX_MAP = {
     "eff-": "effect",
 }
 
+# Record-type discriminators, in the plugin's OCSF records. The decision
+# sink inserts unmapped["cpex.decision"] on every finalized verdict;
+# unmapped["cpex.effect"] is reserved for AuditHandler::on_effect, which
+# has not landed yet.
+RECORD_TYPE_KEYS = (
+    ("cpex.decision", "decision"),
+    ("cpex.effect", "effect"),
+)
+
+# The per-request join key a signed draw receipt reconciles against.
+REQUEST_ID_KEY = "cmf.request.request_id"
+
 ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
 
 
@@ -117,6 +129,20 @@ class GapDetector:
 
 
 def detect_record_type(event):
+    """Classify a record as a decision or an effect, or None to skip it.
+
+    The plugin's OCSF records are keyed on the unmapped object they carry:
+    a finalized verdict from the decision sink brings unmapped["cpex.decision"].
+    Their stream_id is a gateway/boot id (e.g. "gw-1/boot-7") nested under
+    unmapped["cpex.stream"], so the dec-/eff- prefix convention below only
+    identifies older seam output that carried a top-level stream_id.
+    """
+    unmapped = event.get("unmapped")
+    if isinstance(unmapped, dict):
+        for key, record_type in RECORD_TYPE_KEYS:
+            if key in unmapped:
+                return record_type
+
     stream_id = event.get("stream_id", "")
     for prefix, record_type in STREAM_PREFIX_MAP.items():
         if stream_id.startswith(prefix):
@@ -133,6 +159,20 @@ def extract_agent_id(event):
 
 
 def extract_correlation_id(event):
+    """Prefer the per-request join key, falling back to the conversation key.
+
+    A signed draw receipt names the request's correlation id, and the plugin
+    carries that at unmapped["cmf.request.request_id"] — deliberately not in
+    metadata.correlation_uid, which it reserves for an id that is stable
+    across events. The ledger's correlation_id is the field a receipt-in-hand
+    is queried against, so the per-request id wins where a record has one.
+    """
+    unmapped = event.get("unmapped")
+    if isinstance(unmapped, dict):
+        request_id = unmapped.get(REQUEST_ID_KEY)
+        if request_id:
+            return request_id
+
     metadata = event.get("metadata", {})
     return metadata.get("correlation_uid", "")
 
