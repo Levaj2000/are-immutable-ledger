@@ -25,14 +25,17 @@ echo "Bundle: $BUNDLE_DIR"
 
 if ! curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
   echo "Starting the ledger compose stack..."
-  if command -v docker >/dev/null 2>&1; then
-    docker compose -f "$REPO_DIR/demo/docker-compose.yml" up -d --build
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
   elif command -v podman-compose >/dev/null 2>&1; then
-    podman-compose -f "$REPO_DIR/demo/docker-compose.yml" up -d --build
+    COMPOSE=(podman-compose)
+  elif [[ -x "$HOME/Library/Python/3.9/bin/podman-compose" ]]; then
+    COMPOSE=("$HOME/Library/Python/3.9/bin/podman-compose")
   else
     echo "docker compose or podman-compose is required to start the ledger" >&2
     exit 2
   fi
+  "${COMPOSE[@]}" -f "$REPO_DIR/demo/docker-compose.yml" up -d --build
 
   for _ in $(seq 1 60); do
     curl -sf "$HEALTH_URL" >/dev/null 2>&1 && break
