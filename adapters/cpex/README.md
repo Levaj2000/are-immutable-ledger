@@ -26,7 +26,7 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 |---|---|---|
 | `unmapped."cpex.decision"` / `unmapped."cpex.effect"` | `entry_type` | `cpex.decision` or `cpex.effect`; legacy `dec-*`/`eff-*` top-level stream prefixes remain accepted for replay |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
-| `metadata.correlation_uid` | `correlation_id` | |
+| `unmapped."cmf.request.request_id"` | `correlation_id` | Signed per-request join key used by draw receipts; falls back to `metadata.correlation_uid` for legacy/run-level records |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
 | JCS-canonicalized event | `content` | Envelope fields stripped |
 | SHA-256 of canonical content | `input_hash` | |

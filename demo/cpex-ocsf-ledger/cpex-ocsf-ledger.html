@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A three-minute, independently verifiable demonstration of the CPEX audit seam, OCSF evidence, and the Immutable Ledger.">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="data:,">
+  <title>Verdict to Proof — CPEX, OCSF and the Immutable Ledger</title>
+  <style>
+    :root {
+      --ink: #e8edf2;
+      --muted: #9aa8b6;
+      --faint: #718092;
+      --canvas: #0b1118;
+      --surface: #111a24;
+      --surface-2: #16212d;
+      --line: #2a3948;
+      --line-strong: #42566a;
+      --accent: #6dd6c4;
+      --accent-ink: #062d28;
+      --blue: #76b7ff;
+      --amber: #f2c66d;
+      --red: #ff8b8b;
+      --green: #8dde9d;
+      --max: 1180px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    button, input { font: inherit; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      color: var(--accent);
+      font-size: .91em;
+    }
+    .shell { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--accent);
+      font-size: .72rem;
+      font-weight: 760;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.12; letter-spacing: -.025em; }
+    h1 { max-width: 840px; font-size: clamp(2.6rem, 6vw, 5.8rem); font-weight: 760; }
+    h2 { font-size: clamp(1.8rem, 3vw, 2.65rem); }
+    h3 { font-size: 1.03rem; letter-spacing: -.01em; }
+    p { margin: 0; }
+    .lede { max-width: 750px; margin-top: 24px; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.32rem); }
+    .quiet { color: var(--muted); }
+    .small { font-size: .84rem; }
+
+    header {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      border-bottom: 1px solid rgba(66, 86, 106, .65);
+      background: rgba(11, 17, 24, .94);
+      backdrop-filter: blur(12px);
+    }
+    .nav {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand { color: var(--ink); font-weight: 760; text-decoration: none; letter-spacing: -.02em; }
+    .nav-links { display: flex; align-items: center; gap: 18px; }
+    .nav-links a { color: var(--muted); font-size: .83rem; text-decoration: none; }
+    .nav-links a:hover, .nav-links a:focus-visible { color: var(--ink); }
+    .mode-button {
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      padding: 7px 12px;
+      background: transparent;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .mode-button:hover, .mode-button:focus-visible { border-color: var(--accent); }
+
+    .hero { padding: 90px 0 54px; }
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 34px;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 29px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      color: var(--muted);
+      font-size: .75rem;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+    .dot.pending { background: var(--amber); }
+
+    section { padding: 72px 0; border-top: 1px solid var(--line); }
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, .72fr) minmax(280px, 1fr);
+      gap: 36px;
+      align-items: end;
+      margin-bottom: 34px;
+    }
+    .section-head p { color: var(--muted); max-width: 640px; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 22px;
+      counter-reset: path;
+    }
+    .node {
+      position: relative;
+      min-height: 190px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 22px;
+      background: var(--surface);
+      counter-increment: path;
+    }
+    .node::before {
+      content: "0" counter(path);
+      display: block;
+      margin-bottom: 24px;
+      color: var(--accent);
+      font: 700 .72rem/1 "SFMono-Regular", Consolas, monospace;
+    }
+    .node:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      width: 23px;
+      height: 1px;
+      top: 50%;
+      right: -23px;
+      background: var(--line-strong);
+    }
+    .node p { margin-top: 12px; color: var(--muted); font-size: .88rem; }
+    .node .contract { display: block; margin-top: 20px; color: var(--faint); font-size: .74rem; }
+
+    .boundary {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 18px;
+      margin-top: 24px;
+      border-left: 3px solid var(--amber);
+      padding: 18px 20px;
+      background: rgba(242, 198, 109, .07);
+    }
+    .boundary strong { color: var(--amber); }
+
+    .timeline { display: grid; gap: 2px; }
+    .beat {
+      display: grid;
+      grid-template-columns: 94px 56px minmax(160px, .75fr) minmax(220px, 1.15fr) minmax(220px, 1fr);
+      gap: 18px;
+      align-items: start;
+      padding: 20px 18px;
+      border-top: 1px solid var(--line);
+    }
+    .beat:last-child { border-bottom: 1px solid var(--line); }
+    .beat:hover { background: var(--surface); }
+    .time { color: var(--faint); font: 600 .72rem/1.5 "SFMono-Regular", Consolas, monospace; }
+    .number { color: var(--accent); font: 700 .8rem/1.5 "SFMono-Regular", Consolas, monospace; }
+    .evidence { color: var(--muted); font-size: .88rem; }
+    .outcome { font-size: .88rem; }
+    .outcome.deny { color: var(--red); }
+    .outcome.warn { color: var(--amber); }
+    .outcome.allow { color: var(--green); }
+
+    .payoff {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);
+      gap: 26px;
+      margin-top: 34px;
+    }
+    .quote {
+      padding: 28px 0;
+      border-top: 1px solid var(--accent);
+      border-bottom: 1px solid var(--line);
+      font-size: clamp(1.45rem, 3vw, 2.25rem);
+      font-weight: 680;
+      line-height: 1.28;
+      letter-spacing: -.025em;
+    }
+    .operator-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 22px;
+      background: var(--surface);
+    }
+    .operator-card ol { margin: 18px 0 0; padding-left: 20px; color: var(--muted); }
+    .operator-card li + li { margin-top: 10px; }
+
+    .proof-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--line);
+    }
+    .proof {
+      min-height: 168px;
+      padding: 22px;
+      background: var(--surface);
+    }
+    .proof .label { color: var(--accent); font: 700 .7rem/1 "SFMono-Regular", Consolas, monospace; text-transform: uppercase; letter-spacing: .08em; }
+    .proof h3 { margin-top: 16px; }
+    .proof p { margin-top: 10px; color: var(--muted); font-size: .86rem; }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .owner { padding-top: 18px; border-top: 2px solid var(--line-strong); }
+    .owner:nth-child(2) { border-color: var(--accent); }
+    .owner p { margin-top: 12px; color: var(--muted); font-size: .87rem; }
+    .owner ul { margin: 18px 0 0; padding-left: 18px; font-size: .84rem; }
+    .owner li + li { margin-top: 8px; }
+
+    .gates { margin-top: 38px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .gate {
+      display: grid;
+      grid-template-columns: 32px minmax(170px, .45fr) 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 16px 18px;
+      background: var(--surface);
+      border-top: 1px solid var(--line);
+    }
+    .gate:first-child { border-top: 0; }
+    .gate input { width: 18px; height: 18px; accent-color: var(--accent); }
+    .gate p { color: var(--muted); font-size: .84rem; }
+    .gate:has(input:checked) { background: rgba(109, 214, 196, .065); }
+    .gate:has(input:checked) h3 { color: var(--accent); }
+
+    .sources { display: flex; flex-wrap: wrap; gap: 10px; }
+    .source {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 11px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: .8rem;
+    }
+    .source:hover, .source:focus-visible { color: var(--ink); border-color: var(--accent); }
+
+    footer { padding: 34px 0 54px; border-top: 1px solid var(--line); }
+    .footer-row { display: flex; justify-content: space-between; gap: 24px; color: var(--faint); font-size: .77rem; }
+
+    .presenter-panel {
+      display: none;
+      position: fixed;
+      z-index: 40;
+      right: 20px;
+      bottom: 20px;
+      width: min(420px, calc(100% - 40px));
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      padding: 18px;
+      background: #081018;
+    }
+    body.presenter .presenter-panel { display: block; }
+    .presenter-panel header { position: static; display: flex; justify-content: space-between; border: 0; background: transparent; backdrop-filter: none; }
+    .presenter-panel button { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .presenter-panel .next { margin-top: 14px; color: var(--ink); font-size: 1.08rem; }
+    .progress { height: 4px; margin-top: 16px; background: var(--line); }
+    .progress span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s ease; }
+
+    @media (max-width: 920px) {
+      .architecture { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .node:not(:last-child)::after { display: none; }
+      .beat { grid-template-columns: 72px 40px 1fr; }
+      .beat .evidence, .beat .outcome { grid-column: 3; }
+      .split { grid-template-columns: 1fr; }
+      .section-head, .payoff { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 650px) {
+      .shell { width: min(100% - 24px, var(--max)); }
+      .nav-links a { display: none; }
+      .hero { padding-top: 62px; }
+      section { padding: 52px 0; }
+      .architecture, .proof-grid { grid-template-columns: 1fr; }
+      .beat { grid-template-columns: 55px 1fr; gap: 10px; padding: 17px 8px; }
+      .beat .number { grid-column: 1; }
+      .beat h3, .beat .evidence, .beat .outcome { grid-column: 2; }
+      .time { grid-column: 1 / -1; }
+      .gate { grid-template-columns: 28px 1fr; }
+      .gate p { grid-column: 2; }
+      .footer-row { flex-direction: column; }
+    }
+    @media print {
+      :root { --ink: #111820; --muted: #46515c; --faint: #66717c; --canvas: #fff; --surface: #fff; --line: #ccd3d9; --line-strong: #8c9aa5; --accent: #086c60; --blue: #145f9b; }
+      header, .mode-button, .presenter-panel { display: none !important; }
+      section { break-inside: avoid; padding: 38px 0; }
+      .hero { padding: 28px 0; }
+      .node, .proof, .operator-card, .gates { background: #fff; }
+      a { color: inherit; text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell nav">
+      <a class="brand" href="#top">Verdict to Proof</a>
+      <nav class="nav-links" aria-label="Page sections">
+        <a href="#pathway">Pathway</a>
+        <a href="#run">Live run</a>
+        <a href="#proof">Proof</a>
+        <a href="#ownership">Ownership</a>
+        <button class="mode-button" id="presenter-toggle" type="button">Presenter mode</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <div class="shell hero">
+      <p class="eyebrow">Joint architecture and demo plan · 2026-08-31</p>
+      <h1>Every verdict becomes evidence.</h1>
+      <p class="lede">One request path, three independent projects, and no shared implementation. CPEX owns the enforcement decision. The OCSF plugin renders signed evidence. The immutable ledger makes it durable and independently verifiable.</p>
+      <div class="status-strip" aria-label="Project status">
+        <span class="tag"><span class="dot"></span>CPEX #166 canonical seam</span>
+        <span class="tag"><span class="dot"></span>OCSF decision sink verified</span>
+        <span class="tag"><span class="dot"></span>Ledger covered bytes aligned</span>
+        <span class="tag"><span class="dot"></span>Ledger current stream shape merged</span>
+        <span class="tag"><span class="dot pending"></span>Beat 06 panic harness pending</span>
+        <span class="tag"><span class="dot pending"></span>Praxis Policy #11/#12 pending</span>
+      </div>
+    </div>
+
+    <section id="pathway">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">The pathway</p>
+            <h2>Open contracts at every handoff</h2>
+          </div>
+          <p>The demo should make the boundaries visible. Each project can be replaced or inspected independently; portability comes from the seam, the OCSF record shape, AID-EMIT-1 covered bytes, and the ledger API—not from shared source code.</p>
+        </div>
+
+        <div class="architecture">
+          <article class="node">
+            <h3>Praxis gateway</h3>
+            <p>Receives the tool request, subject identity, mandate, and request join key.</p>
+            <span class="contract">Boundary: request + authority context</span>
+          </article>
+          <article class="node">
+            <h3>PPE / CPEX core</h3>
+            <p>Owns the finalized <code>DecisionLog</code> and crash-safe effect protocol.</p>
+            <span class="contract">Boundary: AuditHandler + EffectRecord</span>
+          </article>
+          <article class="node">
+            <h3>OCSF audit plugin</h3>
+            <p>Emits OCSF 6003 records with JCS fingerprints, DSSE signatures, and stream stamps.</p>
+            <span class="contract">Boundary: OCSF 1.9 + AID-EMIT-1</span>
+          </article>
+          <article class="node">
+            <h3>Immutable ledger</h3>
+            <p>Stores canonical records in durable V3 chains and exposes receipts and offline exports.</p>
+            <span class="contract">Boundary: gRPC / JSONL adapter</span>
+          </article>
+        </div>
+
+        <div class="boundary">
+          <strong>Honest boundary</strong>
+          <p>The five existing <code>decision_sink_demo</code> records traverse the full CPEX → OCSF → ledger path today. OAuth <code>begin_effect</code> / recovery is demonstrated from CPEX’s effect WAL separately until Praxis Policy #12 and the plugin settle a class-correct OCSF effect event. The <code>plugin_panic</code> core path is live on #166; beat 06 remains amber until its end-to-end example harness lands.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="run">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">The live run</p>
+            <h2>Six beats in three minutes</h2>
+          </div>
+          <p>Lead with outcomes, not infrastructure. Every request should produce one terse gateway result and one terse evidence result. Save hashing, signatures, and chain verification for the payoff.</p>
+        </div>
+
+        <div class="timeline" role="list" aria-label="Demo beats">
+          <article class="beat" role="listitem" data-presenter="Send a clean allow. Point out that normal traffic is evidence too.">
+            <span class="time">00:25</span><span class="number">01</span>
+            <h3>Clean allow</h3>
+            <p class="outcome allow">Allowed / Allowed</p>
+            <p class="evidence">One OCSF decision record; dense <code>stream_seq</code>; signed request id.</p>
+          </article>
+          <article class="beat" role="listitem" data-presenter="Modify the payload during transform. Show that Modified remains distinct from a plain allow.">
+            <span class="time">00:40</span><span class="number">02</span>
+            <h3>Allow after modification</h3>
+            <p class="outcome warn">Modified / Allowed</p>
+            <p class="evidence">The transformed outcome remains queryable instead of collapsing into an ordinary allow.</p>
+          </article>
+          <article class="beat" role="listitem" data-presenter="Send the policy deny. Emphasize that a post-hook observer could never see this record.">
+            <span class="time">00:55</span><span class="number">03</span>
+            <h3>Policy deny</h3>
+            <p class="outcome deny">Denied / Blocked</p>
+            <p class="evidence">Violation preserved at <code>status_code</code> and <code>status_detail</code>.</p>
+          </article>
+          <article class="beat" role="listitem" data-presenter="Trigger a deny during transform. The enforcement outcome remains allow, but the suppressed deny stays visible.">
+            <span class="time">01:10</span><span class="number">04</span>
+            <h3>Suppressed transform deny</h3>
+            <p class="outcome warn">DenyIgnored + Aborted</p>
+            <p class="evidence"><code>deny_ignored: true</code>; never flattened into an ordinary allow.</p>
+          </article>
+          <article class="beat" role="listitem" data-presenter="Show the mandate draw and signed request join key. Begin its OAuth mint, wait for prepared, kill the process, restart, and show unknown recovery in a new epoch.">
+            <span class="time">01:25</span><span class="number">05</span>
+            <h3>Mandate draw + interrupted mint</h3>
+            <p class="outcome warn">prepared → kill -9 → unknown</p>
+            <p class="evidence">The decision carries <code>cmf.request.request_id</code>. Effect recovery remains a separate WAL proof; the new epoch is the expected <code>stream_seq</code> discontinuity, never a gap.</p>
+          </article>
+          <article class="beat" role="listitem" data-presenter="Run the demo-only panicking plugin if its harness is present. Show fail-closed behavior and queryable plugin_panic evidence; otherwise identify this beat as staged.">
+            <span class="time">02:05</span><span class="number">06</span>
+            <h3>Panicking plugin <span class="quiet small">· harness pending</span></h3>
+            <p class="outcome deny">Denied / Blocked · plugin_panic</p>
+            <p class="evidence">The #166 runtime path is live: <code>catch_unwind</code> → finalized deny → awaited audit sink. Amber until the runnable OCSF example exists.</p>
+          </article>
+        </div>
+
+        <div class="payoff">
+          <p class="quote">“The gateway audits its own enforcement, crashes included, and a third party can verify it offline.”</p>
+          <aside class="operator-card">
+            <h3>Final 55 seconds</h3>
+            <ol>
+              <li>Export the signed decision bundle from the ledger.</li>
+              <li>Disable networking and run Jeff’s conformance validator.</li>
+              <li>Verify fingerprints, DSSE, chain linkage, and density within each <code>(epoch, stream_id)</code>.</li>
+              <li>Query <code>plugin_panic</code>, <code>deny_ignored</code>, <code>Modified</code>, and the request join key.</li>
+            </ol>
+            <p style="margin-top:14px"><code>python3 scripts/aid_emit1_validator.py records.ndjson --key pubkey.pem</code></p>
+            <p class="small quiet" style="margin-top:10px">No <code>--strict-gaps</code> on stage: findings remain visible without turning an honestly scoped boundary into a failed demo.</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="proof">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">The proof contract</p>
+            <h2>Show pass conditions on screen</h2>
+          </div>
+          <p>The verifier—not the presenter—should make the claims. Final verification uses exported files only and requires no trust in the gateway, plugin process, ledger service, or exporter.</p>
+        </div>
+
+        <div class="proof-grid">
+          <article class="proof"><span class="label">01 · Fidelity</span><h3>One finalized record per invocation</h3><p>Allow, deny, modified, DenyIgnored, Aborted, and plugin panic retain distinct semantics.</p></article>
+          <article class="proof"><span class="label">02 · Completeness</span><h3>Dense sequence within each epoch and stream</h3><p>A <code>stream_seq</code> gap is evidence of loss. <code>emission_seq</code> establishes ordering only.</p></article>
+          <article class="proof"><span class="label">03 · Record integrity</span><h3>AID-EMIT-1 fingerprint reproduces</h3><p>Strip only the declared derived fields, JCS-canonicalize, hash with SHA-256, and compare.</p></article>
+          <article class="proof"><span class="label">04 · Origin</span><h3>DSSE signature verifies offline</h3><p>ECDSA P-256 signs the DSSE PAE of the same canonical bytes covered by the fingerprint.</p></article>
+          <article class="proof"><span class="label">05 · Durability</span><h3>Ledger V3 chains verify</h3><p>The ledger independently binds stored content, metadata, and chain position after ingestion.</p></article>
+          <article class="proof"><span class="label">06 · Portability</span><h3>PPE requires a dependency swap only</h3><p>After Policy #11 lands, rerun the same plugin protocol. Any plugin source change is a port finding.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="ownership">
+      <div class="shell">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Ownership</p>
+            <h2>Three projects, three sign-offs</h2>
+          </div>
+          <p>The split deliberately follows the architecture. Nobody needs to own another project’s implementation to verify the result.</p>
+        </div>
+
+        <div class="split">
+          <article class="owner">
+            <h3>Teryl · PPE / CPEX</h3>
+            <p>Own the deterministic enforcement traffic, effect interruption, recovery, stream-stamp generation, and eventual Policy #11 port.</p>
+            <ul><li>Verdict fidelity</li><li>Awaited audit-handler contract</li><li>Generate epoch and sequence stamps</li><li>Effect recovery semantics</li><li>Zero plugin-source changes on PPE</li></ul>
+          </article>
+          <article class="owner">
+            <h3>Jeff · OCSF / AID-EMIT-1</h3>
+            <p>Own the record mapping, covered bytes, deterministic signing, binding CPEX’s stream stamps into the hashed bytes, and the cross-host conformance report.</p>
+            <ul><li>OCSF vocabulary</li><li>JCS fingerprint reproduction</li><li>DSSE verification</li><li>Bind stamps into the fingerprint</li><li>Stream semantics and CPEX↔PPE comparison</li></ul>
+          </article>
+          <article class="owner">
+            <h3>Jonathan · Immutable ledger</h3>
+            <p>Own ingestion, durable storage, epoch-aware gap detection, receipts, queries, and the repeatable demo runner.</p>
+            <ul><li>No current-shape records skipped</li><li>V3 chain verification</li><li>Join-key query</li><li>One-command reproducibility</li></ul>
+          </article>
+        </div>
+
+        <div class="gates" aria-label="Definition of done checklist">
+          <label class="gate"><input type="checkbox" data-gate><h3>Pin exact revisions</h3><p>Print verbatim: <code>seam cpex#166 @ 386710a · rustc 1.96.1 · 33/33 port tests green</code>. Also print the ledger and AID-EMIT-1 revisions.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Produce deterministic evidence</h3><p>All five <code>decision_sink_demo</code> records, the epoch-scoped effect-recovery sequence, and beat 06 when its panic harness is available match the documented outcomes.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Verify without services</h3><p>Fingerprints, signatures, sequence density, and ledger chains verify from exported bundles with networking disabled.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Keep the effect boundary explicit</h3><p>Recovery is shown from the effect WAL until Policy #12 defines and implements the OCSF effect event.</p></label>
+          <label class="gate"><input type="checkbox" data-gate><h3>Repeat on PPE</h3><p>After Policy #11/#12 land, swap the dependency and publish a side-by-side conformance report; no silent compatibility shim.</p></label>
+        </div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <div class="section-head">
+          <div><p class="eyebrow">Primary sources</p><h2>Review the contracts directly</h2></div>
+          <p>This page is a working demo plan, not a specification. The linked upstream artifacts remain authoritative.</p>
+        </div>
+        <div class="sources">
+          <a class="source" href="https://github.com/contextforge-org/cpex/pull/166">CPEX #166 · audit seam</a>
+          <a class="source" href="https://github.com/praxis-proxy/policy/issues/11">Praxis Policy #11 · seam port</a>
+          <a class="source" href="https://github.com/praxis-proxy/policy/issues/12">Praxis Policy #12 · OCSF sink</a>
+          <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/docs/specs/aid-emit-1.md">AID-EMIT-1</a>
+          <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/scripts/aid_emit1_validator.py">AID-EMIT-1 offline validator</a>
+          <a class="source" href="https://github.com/Levaj2000/AI-Identity/blob/main/integrations/cpex-ocsf-audit/PRAXIS-PORT-PLAN.md">Jeff’s PPE port plan</a>
+          <a class="source" href="https://github.com/jkershawrh/are-immutable-ledger/pull/14">Ledger PR #14 · stream shape merged</a>
+          <a class="source" href="https://github.com/jkershawrh/are-immutable-ledger">Immutable ledger</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-row">
+      <span>Working plan for Teryl Taylor, Jeff Leva and Jonathan Kershaw</span>
+      <span>Evidence of what happened—not a claim that every assertion was true.</span>
+    </div>
+  </footer>
+
+  <aside class="presenter-panel" aria-live="polite" aria-label="Presenter cue">
+    <header><strong>Presenter cue</strong><button id="presenter-close" type="button" aria-label="Close presenter mode">Close</button></header>
+    <p class="next" id="presenter-cue">Begin with the four project boundaries. Do not lead with cryptography.</p>
+    <div class="progress" aria-hidden="true"><span id="presenter-progress"></span></div>
+    <p class="small quiet" id="presenter-count">Opening · 0 of 5</p>
+    <button class="mode-button" id="presenter-next" type="button" style="margin-top:12px">Next cue</button>
+  </aside>
+
+  <script>
+    (() => {
+      const body = document.body;
+      const toggle = document.getElementById('presenter-toggle');
+      const close = document.getElementById('presenter-close');
+      const next = document.getElementById('presenter-next');
+      const cue = document.getElementById('presenter-cue');
+      const count = document.getElementById('presenter-count');
+      const progress = document.getElementById('presenter-progress');
+      const beats = Array.from(document.querySelectorAll('[data-presenter]'));
+      let current = -1;
+
+      function renderCue() {
+        if (current < 0) {
+          cue.textContent = 'Begin with the four project boundaries. Do not lead with cryptography.';
+          count.textContent = `Opening · 0 of ${beats.length}`;
+          progress.style.width = '0%';
+          return;
+        }
+        const beat = beats[current];
+        cue.textContent = beat.dataset.presenter;
+        count.textContent = `Beat ${current + 1} of ${beats.length}`;
+        progress.style.width = `${((current + 1) / beats.length) * 100}%`;
+        beat.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      toggle.addEventListener('click', () => { body.classList.add('presenter'); renderCue(); });
+      close.addEventListener('click', () => body.classList.remove('presenter'));
+      next.addEventListener('click', () => { current = current >= beats.length - 1 ? -1 : current + 1; renderCue(); });
+      document.addEventListener('keydown', event => {
+        if (!body.classList.contains('presenter')) return;
+        if (event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); next.click(); }
+        if (event.key === 'Escape') close.click();
+      });
+
+      const gates = Array.from(document.querySelectorAll('[data-gate]'));
+      const saved = JSON.parse(localStorage.getItem('cpex-demo-gates') || '[]');
+      gates.forEach((gate, index) => {
+        gate.checked = Boolean(saved[index]);
+        gate.addEventListener('change', () => {
+          localStorage.setItem('cpex-demo-gates', JSON.stringify(gates.map(item => item.checked)));
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

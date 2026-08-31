@@ -125,6 +125,12 @@ def extract_agent_id(event):
 
 
 def extract_correlation_id(event):
+    unmapped = event.get("unmapped", {})
+    if isinstance(unmapped, dict):
+        request = unmapped.get("cmf.request.request_id")
+        if isinstance(request, str) and request:
+            return request
+
     metadata = event.get("metadata", {})
     return metadata.get("correlation_uid", "")
 
