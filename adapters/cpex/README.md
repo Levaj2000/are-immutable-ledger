@@ -35,6 +35,10 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 ## Gap Detection
 
+The stamps ride under `unmapped."cpex.stream"` (`epoch` / `stream_id` / `stream_seq` /
+`emission_seq`), inside the hashed bytes. Top-level fields are accepted as a fallback
+for older seam output.
+
 The adapter validates two counters from the CPEX audit seam:
 
 - **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within an epoch of its stream; a gap means a missing record. The adapter alerts on gaps. A CPEX restart opens a new epoch and legitimately resets the counter — that discontinuity is expected and is not a gap.
@@ -42,11 +46,15 @@ The adapter validates two counters from the CPEX audit seam:
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
 
-**Known limitation:** `GapDetector` keys continuity on `stream_id` alone, so a stream that
-crosses an epoch boundary — a CPEX restart mid-run — is reported as a gap and fails
-`--strict-gaps`, even though the reset is expected. Keying on `(epoch, stream_id)` is
-pending confirmation of the epoch field's name and location in the seam record (cpex#166).
-Until then, do not run `--strict-gaps` across a restart.
+The reset is reported on stderr as
+`NOTE: EPOCH CHANGE in <stream_id>: <old> -> <new>` and does **not** count toward
+`gaps_detected`, so `--strict-gaps` stays usable across a restart.
+
+**Known limitation:** `detect_record_type` reads `stream_id` from the top level of the
+event, but the plugin's OCSF records carry it under `unmapped."cpex.stream"`, with
+gateway/boot ids (`gw-1/boot-7`) rather than the `dec-*` / `eff-*` prefixes this adapter
+keys `entry_type` on. Records in that shape are skipped rather than written. How
+`entry_type` should be derived from them is still open.
 
 ## Content Canonicalization
 

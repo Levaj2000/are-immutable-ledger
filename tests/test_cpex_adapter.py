@@ -27,6 +27,7 @@ from cpex_to_ledger import (
     extract_correlation_id,
     extract_idempotency_key,
     extract_signer_key_reference,
+    extract_stream_stamps,
     extract_writer_signature,
     process_line,
 )
@@ -375,3 +376,107 @@ class TestProcessLine:
         input_hash = call.kwargs["input_hash"]
         expected = hashlib.sha256(content_bytes).hexdigest()
         assert input_hash == expected
+
+
+# --- Epoch boundaries (CPEX restart) ---
+
+
+EPOCH_A = 1_755_648_000_000_000_000
+EPOCH_B = 1_755_649_000_000_000_000
+
+
+class TestStreamStampExtraction:
+    def test_stamps_read_from_unmapped_cpex_stream(self):
+        event = {
+            "unmapped": {
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 41,
+                    "emission_seq": 41,
+                }
+            }
+        }
+        assert extract_stream_stamps(event) == (EPOCH_A, "gw-1/boot-7", 41, 41)
+
+    def test_falls_back_to_top_level_stamps(self):
+        event = {"stream_id": "dec-boot-001", "stream_seq": 3, "emission_seq": 9}
+        assert extract_stream_stamps(event) == (None, "dec-boot-001", 3, 9)
+
+    def test_nested_stamps_win_over_top_level(self):
+        event = {
+            "stream_id": "dec-boot-001",
+            "stream_seq": 3,
+            "unmapped": {
+                "cpex.stream": {
+                    "epoch": EPOCH_A,
+                    "stream_id": "gw-1/boot-7",
+                    "stream_seq": 41,
+                    "emission_seq": 41,
+                }
+            },
+        }
+        assert extract_stream_stamps(event) == (EPOCH_A, "gw-1/boot-7", 41, 41)
+
+
+class TestEpochBoundaries:
+    def test_restart_resetting_stream_seq_is_not_a_gap(self, gap_detector):
+        gap_detector.check("gw-1", 42, 42, epoch=EPOCH_A)
+        gap_detector.check("gw-1", 43, 43, epoch=EPOCH_A)
+        alerts = gap_detector.check("gw-1", 1, 44, epoch=EPOCH_B)
+        assert alerts == []
+
+    def test_restart_is_reported_as_an_epoch_change_note(self, gap_detector):
+        gap_detector.check("gw-1", 43, 43, epoch=EPOCH_A)
+        gap_detector.pop_notes()
+        gap_detector.check("gw-1", 1, 44, epoch=EPOCH_B)
+        notes = gap_detector.pop_notes()
+        assert len(notes) == 1
+        assert "EPOCH CHANGE in gw-1" in notes[0]
+        assert "not a gap" in notes[0]
+
+    def test_notes_are_drained_once(self, gap_detector):
+        gap_detector.check("gw-1", 43, 43, epoch=EPOCH_A)
+        gap_detector.check("gw-1", 1, 44, epoch=EPOCH_B)
+        assert len(gap_detector.pop_notes()) == 1
+        assert gap_detector.pop_notes() == []
+
+    def test_first_record_of_a_stream_notes_nothing(self, gap_detector):
+        gap_detector.check("gw-1", 41, 41, epoch=EPOCH_A)
+        assert gap_detector.pop_notes() == []
+
+    def test_gap_within_one_epoch_is_still_detected(self, gap_detector):
+        gap_detector.check("gw-1", 41, 41, epoch=EPOCH_A)
+        alerts = gap_detector.check("gw-1", 43, 43, epoch=EPOCH_A)
+        assert len(alerts) == 1
+        assert "expected stream_seq 42" in alerts[0]
+
+    def test_continuity_resumes_within_the_new_epoch(self, gap_detector):
+        gap_detector.check("gw-1", 43, 43, epoch=EPOCH_A)
+        gap_detector.check("gw-1", 1, 44, epoch=EPOCH_B)
+        assert gap_detector.check("gw-1", 2, 45, epoch=EPOCH_B) == []
+        alerts = gap_detector.check("gw-1", 4, 46, epoch=EPOCH_B)
+        assert len(alerts) == 1
+        assert "expected stream_seq 3" in alerts[0]
+
+    def test_epochs_do_not_share_a_counter(self, gap_detector):
+        gap_detector.check("gw-1", 7, 1, epoch=EPOCH_A)
+        gap_detector.check("gw-1", 7, 2, epoch=EPOCH_B)
+        assert gap_detector.check("gw-1", 8, 3, epoch=EPOCH_B) == []
+
+    def test_restart_does_not_increment_gap_stats(self, mock_client, stats, gap_detector):
+        def event_with_stamps(uid, epoch, seq, emission):
+            event = make_decision_event()
+            event["metadata"]["uid"] = uid
+            event["unmapped"]["cpex.stream"] = {
+                "epoch": epoch,
+                "stream_id": "gw-1/boot-7",
+                "stream_seq": seq,
+                "emission_seq": emission,
+            }
+            return json.dumps(event)
+
+        process_line(mock_client, event_with_stamps("r-1", EPOCH_A, 43, 43), stats, gap_detector)
+        process_line(mock_client, event_with_stamps("r-2", EPOCH_B, 1, 44), stats, gap_detector)
+        assert stats["gaps_detected"] == 0
+        assert stats["written"] == 2
