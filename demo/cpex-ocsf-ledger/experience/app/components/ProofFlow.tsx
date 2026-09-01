@@ -1,6 +1,6 @@
 'use client';
 
-import { Background, Controls, MarkerType, ReactFlow, type Edge, type Node } from '@xyflow/react';
+import { Background, Controls, MarkerType, Position, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 const roles = [
@@ -22,6 +22,8 @@ export function ProofFlow({ activeIndex }: { activeIndex: number }) {
     id: role.id,
     position: { x: role.x, y: role.y },
     draggable: false,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
     data: { label: <div className="flow-node"><span className="flow-pulse" style={{ background: role.color }} /><strong>{role.label}</strong><small>{role.sub}</small></div> },
     className: role.id === active ? 'flow-card flow-card-active' : 'flow-card',
     style: { borderColor: role.id === active ? role.color : '#3b4552' },
@@ -30,6 +32,8 @@ export function ProofFlow({ activeIndex }: { activeIndex: number }) {
     id: `${source}-${target}`,
     source,
     target,
+    type: 'smoothstep',
+    pathOptions: { borderRadius: 18, offset: 26 },
     animated: index <= Math.min(activeIndex, links.length - 1),
     style: { stroke: index <= activeIndex ? '#78a9ff' : '#3b4552', strokeWidth: 2 },
     markerEnd: { type: MarkerType.ArrowClosed, color: index <= activeIndex ? '#78a9ff' : '#3b4552' },
