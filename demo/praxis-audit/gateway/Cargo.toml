@@ -41,17 +41,17 @@ praxis-filter = { package = "praxis-proxy-filter", version = "=0.7.4" }
 serde_json = "1"
 serde_yaml = { package = "yaml_serde", version = "0.10" }
 
-ocsf-audit = { package = "praxis-policy-plugin-ocsf-audit", git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-pii-scanner = { package = "praxis-policy-plugin-pii-scanner", git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
+ocsf-audit = { package = "praxis-policy-plugin-ocsf-audit", git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+pii-scanner = { package = "praxis-policy-plugin-pii-scanner", git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
 
 [patch.crates-io]
-praxis-policy = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-core = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-orchestration = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-apl-core = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-apl-cmf = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-apl-runtime = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
-praxis-policy-builtins = { git = "https://github.com/Levaj2000/policy", rev = "61692e6bc0f784b6007d92b16934e22b20124800" }
+praxis-policy = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-core = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-orchestration = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-apl-core = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-apl-cmf = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-apl-runtime = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
+praxis-policy-builtins = { git = "https://github.com/Levaj2000/policy", rev = "3b72d5f7d35a3bce8ca47204fb5169496e9155d9" }
 
 [profile.release]
 debug = false

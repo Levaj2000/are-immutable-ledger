@@ -2749,7 +2749,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "praxis-policy-apl-cmf",
  "praxis-policy-apl-core",
@@ -2761,7 +2761,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-apl-cmf"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "chrono",
  "praxis-policy-apl-core",
@@ -2772,7 +2772,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-apl-core"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "async-trait",
  "futures",
@@ -2788,7 +2788,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-apl-runtime"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2806,7 +2806,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-builtins"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2842,7 +2842,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-core"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2869,7 +2869,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-orchestration"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "futures",
  "tokio",
@@ -2878,7 +2878,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-plugin-ocsf-audit"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -2898,7 +2898,7 @@ dependencies = [
 [[package]]
 name = "praxis-policy-plugin-pii-scanner"
 version = "0.4.1"
-source = "git+https://github.com/Levaj2000/policy?rev=61692e6bc0f784b6007d92b16934e22b20124800#61692e6bc0f784b6007d92b16934e22b20124800"
+source = "git+https://github.com/Levaj2000/policy?rev=3b72d5f7d35a3bce8ca47204fb5169496e9155d9#3b72d5f7d35a3bce8ca47204fb5169496e9155d9"
 dependencies = [
  "async-trait",
  "praxis-policy-core",
