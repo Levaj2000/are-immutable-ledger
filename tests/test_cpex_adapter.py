@@ -599,3 +599,86 @@ class TestCorrelationJoinKey:
         process_line(mock_client, json.dumps(event), stats, gap_detector)
         assert stats["written"] == 1
         assert mock_client.issue_receipt.call_args.kwargs["correlation_id"] == "corr-7f3e2a91"
+
+
+# --- AID-EMIT-1 1.2.0-draft keys (aid.*), as the merged ocsf-audit plugin emits ---
+
+
+def make_aid_decision(stream_seq, epoch=EPOCH_A, stream_id="gw-1:decision"):
+    return {
+        "class_uid": 6003,
+        "metadata": {"uid": f"rec-{stream_seq}", "version": "1.9.0"},
+        "ai_agent": {"uid": "agent-7"},
+        "unmapped": {
+            "aid.decision": {"verdict": "allow", "steps": []},
+            "aid.stream": {
+                "epoch": epoch,
+                "stream_id": stream_id,
+                "stream_seq": stream_seq,
+                "emission_seq": stream_seq,
+            },
+        },
+    }
+
+
+class TestAidKeys:
+    def test_decision_record_detected_by_aid_key(self):
+        assert detect_record_type(make_aid_decision(0)) == "decision"
+
+    def test_effect_record_detected_by_aid_key(self):
+        assert detect_record_type({"unmapped": {"aid.effect": {}}}) == "effect"
+
+    def test_stamps_read_from_aid_stream(self):
+        assert extract_stream_stamps(make_aid_decision(41)) == (
+            EPOCH_A,
+            "gw-1:decision",
+            41,
+            41,
+        )
+
+    def test_aid_stream_wins_over_cpex_stream(self):
+        event = make_aid_decision(41)
+        event["unmapped"]["cpex.stream"] = {
+            "epoch": EPOCH_B,
+            "stream_id": "stale",
+            "stream_seq": 3,
+            "emission_seq": 3,
+        }
+        assert extract_stream_stamps(event) == (EPOCH_A, "gw-1:decision", 41, 41)
+
+    def test_aid_record_is_written_with_the_existing_entry_type(
+        self, mock_client, stats, gap_detector
+    ):
+        process_line(mock_client, json.dumps(make_aid_decision(0)), stats, gap_detector)
+        assert stats["written"] == 1
+        assert stats["skipped"] == 0
+        assert mock_client.issue_receipt.call_args.kwargs["entry_type"] == "cpex.decision"
+
+    def test_gap_detected_on_aid_stream(self, mock_client, stats, gap_detector):
+        for seq in (0, 1, 3):
+            process_line(mock_client, json.dumps(make_aid_decision(seq)), stats, gap_detector)
+        assert stats["gaps_detected"] == 1
+
+    def test_restart_on_aid_stream_is_not_a_gap(self, mock_client, stats, gap_detector):
+        for seq in (0, 1, 2):
+            process_line(mock_client, json.dumps(make_aid_decision(seq)), stats, gap_detector)
+        restarted = make_aid_decision(0, epoch=EPOCH_B)
+        process_line(mock_client, json.dumps(restarted), stats, gap_detector)
+        assert stats["gaps_detected"] == 0
+        assert stats["written"] == 4
+
+
+class TestEmissionOrderAcrossEpochs:
+    def test_emission_seq_reset_by_a_restart_is_not_an_ordering_violation(self, gap_detector):
+        assert gap_detector.check("gw-1:decision", 0, 5, epoch=EPOCH_A) == []
+        assert gap_detector.check("gw-1:decision", 0, 0, epoch=EPOCH_B) == []
+
+    def test_older_epoch_after_newer_is_an_ordering_violation(self, gap_detector):
+        gap_detector.check("gw-1:decision", 0, 0, epoch=EPOCH_B)
+        alerts = gap_detector.check("gw-1:effect", 0, 9, epoch=EPOCH_A)
+        assert any(a.startswith("ORDERING") for a in alerts)
+
+    def test_backwards_emission_seq_within_an_epoch_is_still_flagged(self, gap_detector):
+        gap_detector.check("gw-1:decision", 0, 4, epoch=EPOCH_A)
+        alerts = gap_detector.check("gw-1:effect", 0, 3, epoch=EPOCH_A)
+        assert any(a.startswith("ORDERING") for a in alerts)
