@@ -24,7 +24,7 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 
 | OCSF 6003 Field | Ledger Field | Notes |
 |---|---|---|
-| `unmapped."cpex.decision"` present | `entry_type` | `cpex.decision`; `unmapped."cpex.effect"` reserved for `on_effect`. Falls back to a `dec-*`/`eff-*` prefixed top-level `stream_id` for older seam output |
+| `unmapped."aid.decision"` present | `entry_type` | `cpex.decision`; `unmapped."aid.effect"` reserved for `on_effect`. The pre-rename `cpex.decision` / `cpex.effect` keys are also accepted. Falls back to a `dec-*`/`eff-*` prefixed top-level `stream_id` for older seam output |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
 | `unmapped."cmf.request.request_id"` | `correlation_id` | The join key a signed draw receipt reconciles against. Falls back to `metadata.correlation_uid` (conversation-scoped) when a record carries no request id |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
@@ -40,14 +40,16 @@ queried directly against the ledger.
 
 ## Gap Detection
 
-The stamps ride under `unmapped."cpex.stream"` (`epoch` / `stream_id` / `stream_seq` /
-`emission_seq`), inside the hashed bytes. Top-level fields are accepted as a fallback
-for older seam output.
+The stamps ride under `unmapped."aid.stream"` (`epoch` / `stream_id` / `stream_seq` /
+`emission_seq`), inside the hashed bytes. AID-EMIT-1 1.2.0-draft renamed the format's
+keys from `cpex.*` to `aid.*`, which is what the `ocsf-audit` reference plugin in
+`praxis-proxy/policy` emits; `unmapped."cpex.stream"` is still read for records written
+before the rename, and top-level fields for older seam output.
 
 The adapter validates two counters from the CPEX audit seam:
 
 - **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within an epoch of its stream; a gap means a missing record. The adapter alerts on gaps. A CPEX restart opens a new epoch and legitimately resets the counter — that discontinuity is expected and is not a gap.
-- **`emission_seq`** (global) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
+- **`emission_seq`** (per epoch, across decisions and effects) — ordering claim only. Legitimately sparse for single-stream consumers. A restart resets it along with the epoch, so the adapter checks `(epoch, emission_seq)` for monotonicity and alerts on ordering violations, not on gaps.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
 

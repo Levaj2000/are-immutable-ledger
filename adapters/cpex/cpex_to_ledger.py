@@ -47,10 +47,14 @@ STREAM_PREFIX_MAP = {
 }
 
 # Record-type discriminators, in the plugin's OCSF records. The decision
-# sink inserts unmapped["cpex.decision"] on every finalized verdict;
-# unmapped["cpex.effect"] is reserved for AuditHandler::on_effect, which
-# has not landed yet.
+# sink inserts unmapped["aid.decision"] on every finalized verdict;
+# unmapped["aid.effect"] is reserved for AuditHandler::on_effect, which
+# has not landed yet. AID-EMIT-1 1.2.0-draft renamed the format's keys
+# from cpex.* to aid.*; the cpex.* names are kept for records written
+# before the rename.
 RECORD_TYPE_KEYS = (
+    ("aid.decision", "decision"),
+    ("aid.effect", "effect"),
     ("cpex.decision", "decision"),
     ("cpex.effect", "effect"),
 )
@@ -61,17 +65,24 @@ REQUEST_ID_KEY = "cmf.request.request_id"
 ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
 
 
-STREAM_STAMP_KEY = "cpex.stream"
+# Current key first, then the pre-rename key.
+STREAM_STAMP_KEYS = ("aid.stream", "cpex.stream")
 
 
 def extract_stream_stamps(event):
     """Return (epoch, stream_id, stream_seq, emission_seq).
 
     The plugin's OCSF records carry the seam's completeness/ordering stamps
-    under unmapped["cpex.stream"], inside the hashed bytes. Older seam output
+    under unmapped["aid.stream"] (unmapped["cpex.stream"] before the
+    AID-EMIT-1 key rename), inside the hashed bytes. Older seam output
     carried them at the top level, so fall back to that.
     """
-    stamps = event.get("unmapped", {}).get(STREAM_STAMP_KEY)
+    unmapped = event.get("unmapped", {})
+    stamps = None
+    for key in STREAM_STAMP_KEYS:
+        stamps = unmapped.get(key)
+        if isinstance(stamps, dict):
+            break
     if not isinstance(stamps, dict):
         stamps = event
     return (
@@ -90,6 +101,7 @@ class GapDetector:
         self._last_seq = {}
         self._last_epoch = {}
         self._last_emission_seq = -1
+        self._last_emission_epoch = None
         self._notes = []
 
     def pop_notes(self):
@@ -118,12 +130,23 @@ class GapDetector:
 
         self._last_seq[key] = stream_seq
 
-        if emission_seq is not None and emission_seq <= self._last_emission_seq:
-            alerts.append(
-                f"ORDERING: emission_seq {emission_seq} <= previous {self._last_emission_seq}"
-            )
+        # emission_seq is per executor: a restart resets it with the new,
+        # larger epoch, so the ordering claim is (epoch, emission_seq). A
+        # record that names no epoch is compared on emission_seq alone.
         if emission_seq is not None:
+            if epoch is not None and self._last_emission_epoch is not None:
+                order = (epoch, emission_seq)
+                previous = (self._last_emission_epoch, self._last_emission_seq)
+            else:
+                order, previous = emission_seq, self._last_emission_seq
+            if order <= previous:
+                alerts.append(
+                    f"ORDERING: emission_seq {emission_seq} <= previous "
+                    f"{self._last_emission_seq}"
+                    + (f" (epoch {epoch})" if epoch is not None else "")
+                )
             self._last_emission_seq = emission_seq
+            self._last_emission_epoch = epoch
 
         return alerts
 
@@ -132,9 +155,9 @@ def detect_record_type(event):
     """Classify a record as a decision or an effect, or None to skip it.
 
     The plugin's OCSF records are keyed on the unmapped object they carry:
-    a finalized verdict from the decision sink brings unmapped["cpex.decision"].
-    Their stream_id is a gateway/boot id (e.g. "gw-1/boot-7") nested under
-    unmapped["cpex.stream"], so the dec-/eff- prefix convention below only
+    a finalized verdict from the decision sink brings unmapped["aid.decision"]
+    (unmapped["cpex.decision"] before the key rename). Their stream_id is a
+    namespaced id (e.g. "gw-1:decision") nested under unmapped["aid.stream"], so the dec-/eff- prefix convention below only
     identifies older seam output that carried a top-level stream_id.
     """
     unmapped = event.get("unmapped")
