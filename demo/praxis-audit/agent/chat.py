@@ -84,6 +84,7 @@ from typing import Any
 import httpx
 import litellm
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 # ---------------------------------------------------------------------------
@@ -822,6 +823,11 @@ def run_chat(
                     tool_text = format_tool_response(status, data)
                     if status >= 400:
                         console.print(f"  [dim]← [red]{status}[/red]: {tool_text}[/dim]")
+                    elif isinstance(data, dict) and "error" in data:
+                        # A gateway deny: HTTP 200 with a JSON-RPC error
+                        # envelope. Red and not dimmed, so the audience sees
+                        # the refusal before the LLM paraphrases it.
+                        console.print(f"  [bold red]← ✗ denied[/bold red] [red]{escape(tool_text)}[/red]")
                     else:
                         # Show the full tool result. Earlier versions truncated
                         # at 200 chars to keep the terminal scannable, but the

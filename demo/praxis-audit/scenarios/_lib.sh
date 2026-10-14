@@ -111,11 +111,14 @@ summarize() {
           elif ($p | test("oauth")) then "token exchange"
           elif $p == "" then "forward"
           else $p end;
-      "    " + ("seq " + (.unmapped."aid.stream".stream_seq | tostring) | pad(8))
+      # Blocked rows in red (ANSI), so a deny stands out in the records pane.
+      (if .disposition == "Blocked" then "\u001b[91m" else "" end)
+        + "    " + ("seq " + (.unmapped."aid.stream".stream_seq | tostring) | pad(8))
         + ((.tool.name // "-") | pad(18))
         + (phase | pad(16))
         + ((.disposition + (if .action == "Modified" then " (modified)" else "" end)) | pad(20))
-        + (.status_code // "")'
+        + (.status_code // "")
+        + (if .disposition == "Blocked" then "\u001b[0m" else "" end)'
 }
 
 # ship <mark>: send the records since <mark> through the ledger's CPEX
