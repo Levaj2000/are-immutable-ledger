@@ -234,11 +234,9 @@ def canonicalize_content(event):
     elif unmapped != event.get("unmapped", {}):
         content["unmapped"] = unmapped
 
-    try:
-        from json_canonicalize import canonicalize
-        canonical = canonicalize(content)
-    except ImportError:
-        canonical = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    # Sorted keys, no whitespace, raw UTF-8: matches RFC 8785 (JCS) for the
+    # OCSF payloads the sink emits (strings, integers, nested objects).
+    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     if isinstance(canonical, str):
         canonical_bytes = canonical.encode("utf-8")
