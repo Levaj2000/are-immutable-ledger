@@ -13,9 +13,18 @@ added so the poisoned wiki page can be read live.
 
 ## Setup
 
-Three panes.
+Three panes, all opened in `demo/praxis-audit`. One Python environment
+serves both the stack and the chat: `run-demo.sh` checks at startup that the
+`python3` on your PATH can import the ledger adapter's packages, so install
+them in the same virtualenv the chat uses and activate it in every pane.
 
 ```bash
+# once: one virtualenv for the demo and the chat
+python3 -m venv ~/praxis-demo-venv
+source ~/praxis-demo-venv/bin/activate
+pip install -r ../../adapters/cpex/requirements.txt   # grpcio, protobuf (run-demo.sh preflight)
+pip install -r agent/requirements.txt                 # litellm, rich, httpx
+
 # 1. the stack: ledger, Keycloak, HR MCP server, gateway. One scripted run
 #    builds everything and leaves it all running; the chat reuses it.
 ./run-demo.sh
@@ -25,7 +34,6 @@ tools/watch-records.sh
 
 # 3. the chat
 cd agent
-pip install -r requirements.txt     # once
 export DEMO_MODEL=...               # a model that tool-calls reliably, see below
 python chat.py --persona bob
 ```
