@@ -34,6 +34,11 @@ every receipt now comes from a record the gateway itself wrote and signed.
 No time to run it? [SAMPLE-RUN.md](SAMPLE-RUN.md) is a full `--deep-dive`
 transcript.
 
+Presenting it? [agent/CHAT.md](agent/CHAT.md) runs the same beats as a live
+conversation: `agent/chat.py` is an LLM agent whose every tool call goes
+through the gateway, and `tools/watch-records.sh` shows each verdict land as
+a signed record in a second pane.
+
 Needs Docker, a Rust toolchain (1.92+), `jq`, `openssl`, and Python 3.10+
 with `pip install -r ../../adapters/cpex/requirements.txt`. The first run
 builds the ledger image and the gateway, which takes several minutes. The
@@ -72,8 +77,9 @@ rule fires first; the domain rule catches the same email from a clean session.
 | `hr-mcp-server/` | joint-cpex's HR MCP server plus `fetch_doc` (the injected page) and `GET /sent` |
 | `keycloak/` | joint-cpex's `cpex-demo` realm (bob, alice, eve, charlie) |
 | `agent/agent.py` | The scripted agent for scenario 03 |
+| `agent/chat.py` | The live LLM agent for presenting (vendored from praxis-proxy/demos), with [CHAT.md](agent/CHAT.md) |
 | `scenarios/` | 01-06 and their shared helpers |
-| `tools/` | Gateway start/stop, ledger receipt lookup, pinned validator fetch |
+| `tools/` | Gateway start/stop, ledger receipt lookup, pinned validator fetch, live record watcher |
 
 `out/` (records, logs) and `keys/` (the generated signing key) are
 git-ignored.
