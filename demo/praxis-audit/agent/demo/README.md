@@ -15,6 +15,10 @@ tmux layout, captured headlessly:
   and the same pane ships the chat's records to the ARE ledger and verifies
   the receipt for the refused email.
 
+`--layout side` is the arrangement used when presenting live: `chat.py` down
+the right half, the policy pane above the records pane on the left. A deny's
+reason moves to its own line there so the records pane never wraps.
+
 ## Prerequisites
 
 1. **The stack up.** From the demo directory run `./run-demo.sh` once. It
@@ -39,6 +43,7 @@ Run from the `agent` directory:
 python demo/record_chat_demo.py --check        # preflight only, no recording
 
 DEMO_MODEL=gpt-4o python demo/record_chat_demo.py --record   # -> chat-demo.{cast,gif,mp4}
+DEMO_MODEL=gpt-4o python demo/record_chat_demo.py --record --layout side
 
 python demo/record_chat_demo.py --gif-only     # re-convert an existing cast
 python demo/record_chat_demo.py --verify       # check the demo markers landed

@@ -17,6 +17,15 @@ tmux layout, captured headlessly with asciinema:
   │ chat.py: the HR copilot talking to the gateway                   │
   └──────────────────────────────────────────────────────────────────┘
 
+`--layout side` instead puts the chat on the right and stacks the policy
+and records panes on the left, the arrangement used when presenting live:
+
+  ┌──────────────────────────────┬──────────────────────────────────┐
+  │ POLICY                       │                                  │
+  ├──────────────────────────────┤ chat.py                          │
+  │ RECORDS                      │                                  │
+  └──────────────────────────────┴──────────────────────────────────┘
+
 The four beats from CHAT.md, then the proof:
   1. Bob (HR) looks up compensation: allowed, token exchanged, four records.
   2. Alice (engineering) tries the same: denied before the HR system sees it.
@@ -28,13 +37,14 @@ The four beats from CHAT.md, then the proof:
 Usage (from the agent/ directory, with the stack up via ../run-demo.sh):
   python demo/record_chat_demo.py --check        # preflight only
   DEMO_MODEL=gpt-4o python demo/record_chat_demo.py --record
+  DEMO_MODEL=gpt-4o python demo/record_chat_demo.py --record --layout side
   python demo/record_chat_demo.py --gif-only     # re-convert an existing .cast
   python demo/record_chat_demo.py --verify       # check the markers in the .cast
   python demo/record_chat_demo.py --no-cleanup   # keep the tmux session (debug)
 
   Internal subcommands the top panes run (not called by hand):
   python demo/record_chat_demo.py spotlight <key>
-  python demo/record_chat_demo.py records
+  python demo/record_chat_demo.py records [--width <cols>]
   python demo/record_chat_demo.py proof --since <n>   # the chat pane runs this at the close
 
 Prerequisites:
@@ -80,8 +90,13 @@ BATCH_FILE = DEMO_DIR / "out" / "record-batch.ndjson"
 
 SESSION = "praxis-audit-chat-demo"
 COLS, ROWS = 160, 48
+# stacked: chat across the bottom, policy top-left, records top-right.
 CHAT_ROWS = 28                            # bottom pane height; the top row gets the rest
 RECORDS_COLS = 90                         # top-right pane width; the policy pane gets the rest
+# side: chat down the right, policy above records on the left.
+SIDE_CHAT_COLS = 88                       # right pane width; the left column gets the rest
+SIDE_RECORDS_ROWS = 27                    # bottom-left pane height; the policy pane gets the rest
+LAYOUTS = ("stacked", "side")
 
 GATEWAY = os.environ.get("PRAXIS_URL", "http://localhost:8090/mcp")
 KEYCLOAK = os.environ.get("KEYCLOAK_URL", "http://localhost:8081")
@@ -275,20 +290,52 @@ def render_spotlight(key: str) -> None:
     _box(s["title"], s["yaml"].splitlines(), s["caption"])
 
 
-def run_records() -> int:
+SUMMARY_STATUS_COL = 66   # summarize(): 4 + seq 8 + tool 18 + phase 16 + verdict 20
+
+
+def fold_summary_line(line: str, width: int) -> list[str]:
+    """Split one summarize() line so it fits `width` columns: the status code
+    (a deny's reason) moves to an indented second line instead of wrapping.
+    Keeps the red ANSI wrap summarize() puts around Blocked rows."""
+    prefix, suffix = "", ""
+    if line.startswith("\x1b[91m") and line.endswith("\x1b[0m"):
+        prefix, suffix = "\x1b[91m", "\x1b[0m"
+        line = line[len(prefix):-len(suffix)]
+    if len(line) <= width or len(line) <= SUMMARY_STATUS_COL:
+        return [prefix + line + suffix]
+    head, status = line[:SUMMARY_STATUS_COL].rstrip(), line[SUMMARY_STATUS_COL:].strip()
+    return [prefix + head + suffix, prefix + " " * 12 + status + suffix]
+
+
+def run_records(width: int = 0) -> int:
     """Follow the gateway's OCSF records as they land, one summary line per
     ruling, reusing summarize() from scenarios/_lib.sh (the same shape the
     scenarios and tools/watch-records.sh print). Prints its own header so the
-    recording carries no absolute path."""
+    recording carries no absolute path. With --width, lines that would wrap
+    are folded instead."""
     print()
-    print("  " + _c("RECORDS  ", CYAN) + _c("one signed, chained OCSF record per ruling, as it lands", YELLOW))
+    print("  " + _c("RECORDS  ", CYAN) + _c("one signed, chained OCSF record per ruling", YELLOW))
     print("  " + _c("seq      tool              phase           verdict", GRAY))
     sys.stdout.flush()
+    # jq fully buffers when its stdout is a pipe (it is one here), so wrap it.
     script = (
         'cd "$1" && source scenarios/_lib.sh && '
+        'jq() { command jq --unbuffered "$@"; } && '
         'tail -n 0 -F "$GATEWAY_STDERR" | grep --line-buffered "^{" | summarize'
     )
-    return subprocess.run(["bash", "-c", script, "_", str(DEMO_DIR)], check=False).returncode
+    proc = subprocess.Popen(["bash", "-c", script, "_", str(DEMO_DIR)],
+                            stdout=subprocess.PIPE, text=True, bufsize=1)
+    assert proc.stdout is not None
+    try:
+        for raw in iter(proc.stdout.readline, ""):
+            line = raw.rstrip("\n")
+            for out in (fold_summary_line(line, width) if width else [line]):
+                print(out, flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        proc.terminate()
+    return proc.wait()
 
 
 def _records_since(mark: int) -> list[dict]:
@@ -358,16 +405,39 @@ def tmux(*args: str, check: bool = True, capture: bool = False):
     return subprocess.run(["tmux", *args], check=check, capture_output=capture, text=True)
 
 
-def pane_ids() -> tuple[str, str, str]:
-    """Return (policy, records, chat) pane ids by position: the chat pane is
-    the lowest one, the policy pane the top-left, the records pane the
-    top-right. Robust to any tmux base-index configuration."""
+def pane_ids(layout: str = "stacked") -> tuple[str, str, str]:
+    """Return (policy, records, chat) pane ids by position, robust to any tmux
+    base-index configuration. stacked: chat is the lowest pane, policy the
+    top-left, records the top-right. side: chat is the rightmost pane, policy
+    the upper-left, records the lower-left."""
     out = tmux("list-panes", "-t", SESSION, "-F", "#{pane_top} #{pane_left} #{pane_id}",
                capture=True).stdout.strip().splitlines()
     panes = [(int(t), int(l), pid) for t, l, pid in (line.split() for line in out)]
-    chat = max(panes, key=lambda p: p[0])
-    top_row = sorted((p for p in panes if p is not chat), key=lambda p: p[1])
-    return top_row[0][2], top_row[-1][2], chat[2]
+    if layout == "side":
+        chat = max(panes, key=lambda p: p[1])
+        column = sorted((p for p in panes if p is not chat), key=lambda p: p[0])
+    else:
+        chat = max(panes, key=lambda p: p[0])
+        column = sorted((p for p in panes if p is not chat), key=lambda p: p[1])
+    return column[0][2], column[-1][2], chat[2]
+
+
+def build_layout(layout: str) -> tuple[str, str, str, int]:
+    """Create the tmux session and panes. Returns the (policy, records, chat)
+    pane ids and the records pane's width."""
+    tmux("new-session", "-d", "-s", SESSION, "-x", str(COLS), "-y", str(ROWS))
+    if layout == "side":
+        tmux("split-window", "-h", "-t", SESSION, "-l", str(SIDE_CHAT_COLS))     # right: chat
+        policy, _, _ = pane_ids(layout)
+        tmux("split-window", "-v", "-t", policy, "-l", str(SIDE_RECORDS_ROWS))  # lower-left: records
+        records_width = COLS - SIDE_CHAT_COLS - 1
+    else:
+        tmux("split-window", "-v", "-t", SESSION, "-l", str(CHAT_ROWS))         # bottom: chat
+        policy, _, _ = pane_ids(layout)
+        tmux("split-window", "-h", "-t", policy, "-l", str(RECORDS_COLS))       # top-right: records
+        records_width = RECORDS_COLS
+    policy, records, chat = pane_ids(layout)
+    return policy, records, chat, records_width
 
 
 def send_line(pane: str, text: str) -> None:
@@ -487,18 +557,14 @@ def _python_for_pane() -> str:
     return rel if not rel.startswith("..") else sys.executable
 
 
-def record(no_cleanup: bool = False) -> int:
+def record(no_cleanup: bool = False, layout: str = "stacked") -> int:
     if not preflight():
         print("\nPreflight failed: fix the above and retry.")
         return 1
     print()
 
     _cleanup_session()
-    tmux("new-session", "-d", "-s", SESSION, "-x", str(COLS), "-y", str(ROWS))
-    tmux("split-window", "-v", "-t", SESSION, "-l", str(CHAT_ROWS))      # bottom: chat
-    policy, _, chat = pane_ids()
-    tmux("split-window", "-h", "-t", policy, "-l", str(RECORDS_COLS))    # top-right: records
-    policy, records, chat = pane_ids()
+    policy, records, chat, records_width = build_layout(layout)
 
     # Position and quiet the panes BEFORE recording so none of this setup (nor
     # any absolute home path) is captured. The two top panes get a blank
@@ -528,7 +594,7 @@ def record(no_cleanup: bool = False) -> int:
     time.sleep(2.0)
 
     try:
-        send_line(records, f"clear; {sys.executable} {SELF} records")
+        send_line(records, f"clear; {sys.executable} {SELF} records --width {records_width - 1}")
         send_line(policy, f"clear; {sys.executable} {SELF} spotlight allow")
         send_line(chat, f"DEMO_MODEL={DEMO_MODEL} {py} chat.py --persona bob")
         if not wait_for_text(chat, BANNER_MARKER, timeout=BANNER_TIMEOUT):
@@ -674,7 +740,8 @@ def main() -> int:
     sub = p.add_subparsers(dest="cmd")
     sp = sub.add_parser("spotlight", help="(internal) render a policy snippet")
     sp.add_argument("key", choices=list(SPOTLIGHTS))
-    sub.add_parser("records", help="(internal) follow the gateway's records")
+    rp = sub.add_parser("records", help="(internal) follow the gateway's records")
+    rp.add_argument("--width", type=int, default=0, help="fold lines wider than this")
     pr = sub.add_parser("proof", help="(internal) ship records and verify a receipt")
     pr.add_argument("--since", type=int, default=0,
                     help="record count when the recording started")
@@ -684,13 +751,16 @@ def main() -> int:
     p.add_argument("--gif-only", action="store_true", help="re-convert existing cast")
     p.add_argument("--verify", action="store_true", help="check markers in the cast")
     p.add_argument("--no-cleanup", action="store_true", help="keep the tmux session")
+    p.add_argument("--layout", choices=LAYOUTS, default="stacked",
+                   help="stacked: chat below policy and records (default); "
+                        "side: chat on the right, policy above records on the left")
     args = p.parse_args()
 
     if args.cmd == "spotlight":
         render_spotlight(args.key)
         return 0
     if args.cmd == "records":
-        return run_records()
+        return run_records(args.width)
     if args.cmd == "proof":
         return run_proof(args.since)
     if args.check:
@@ -701,7 +771,7 @@ def main() -> int:
     if args.verify:
         return 0 if verify() else 1
     if args.record:
-        return record(no_cleanup=args.no_cleanup)
+        return record(no_cleanup=args.no_cleanup, layout=args.layout)
     p.print_help()
     return 0
 
