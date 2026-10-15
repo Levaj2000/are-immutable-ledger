@@ -27,6 +27,14 @@ PY="$(command -v python)"
 "$PY" -c "import litellm, rich, httpx" 2>/dev/null ||
     { echo "  ✗ python ($PY) lacks the chat deps; activate the chat venv first"; exit 1; }
 
+# tmux shrinks the window to this terminal when it attaches, so the cast is
+# only the 160x48 layout if the terminal is at least that big.
+cols="$(tput cols 2>/dev/null || echo 0)"; lines="$(tput lines 2>/dev/null || echo 0)"
+if [ "$cols" -lt "$COLS" ] || [ "$lines" -lt "$ROWS" ]; then
+    echo "  ✗ this terminal is ${cols}x${lines}; the layout needs ${COLS}x${ROWS}. Make the window bigger (full screen) and rerun."
+    exit 1
+fi
+
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$DEMO_DIR"
 tmux split-window -h -t "$SESSION" -l "$CHAT_COLS" -c "$DEMO_DIR/agent"
@@ -47,6 +55,9 @@ done
 echo
 tmux capture-pane -t "$right" -p | grep -q 'Praxis Policy Engine HR Demo' ||
     { echo "  ✗ chat.py did not start; the pane shows:"; tmux capture-pane -t "$right" -p | grep -v '^\s*$'; tmux kill-session -t "$SESSION"; exit 1; }
+# Drop the setup lines from both panes' scrollback so a resize cannot bring
+# them back into view during the recording.
+tmux clear-history -t "$left"; tmux clear-history -t "$right"
 
 cat <<MSG
 
