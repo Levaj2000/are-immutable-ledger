@@ -5,21 +5,33 @@ Reads CPEX audit records (OCSF 6003/ai_operation, JSONL) from stdin or
 a file and writes them to the immutable ledger. Each record becomes a
 ledger entry with:
 
-  entry_type:           "cpex.decision" or "cpex.effect" (from stream_id prefix)
+  entry_type:           "cpex.decision" or "cpex.effect" (from record payload)
   agent_id:             ai_agent.uid (NOT metadata.uid)
   content:              JCS-canonicalized event bytes (envelope stripped)
   content_type:         "application/ocsf+json"
   source_id:            "cpex-audit-seam"
-  correlation_id:       metadata.correlation_uid
+  correlation_id:       metadata.correlation_uid (conversation/run scope)
   idempotency_key:      metadata.uid (the record ID)
   input_hash:           SHA-256 of canonical content
   writer_signature:     unmapped.signature_b64 (base64-decoded)
   signer_key_reference: unmapped.signature_key_id
 
-Gap detection: validates stream_seq continuity per (epoch, stream_id)
-and emission_seq monotonicity. Alerts on gaps but still writes records.
-A CPEX restart opens a new epoch and resets stream_seq; that is reported
-as an epoch change, not a gap.
+Gap detection: validates stream_seq continuity per (epoch, stream_id) —
+including the head of every epoch, which opens at stream_seq 0 — epoch
+ordering per stream_id, and emission_seq monotonicity. Alerts on gaps but
+still writes records.
+
+The plugin's records carry these stamps under unmapped["aid.stream"]
+(AID-EMIT-1 1.2.0-draft renamed the keys from cpex.* to aid.*; the
+pre-rename keys are still read).
+
+Stream ids are opaque to the adapter. A CPEX host that sets
+plugin_settings.audit_stream_namespace stamps them as "<namespace>:<kind>"
+(e.g. "gw-1:decision" / "gw-1:effect"); the namespace may itself contain
+":", so anything that needs the kind back splits on the LAST colon
+(rsplit(":", 1)). Nothing here does — entry_type comes from the record's
+own content (unmapped."aid.decision" / "aid.effect", or the pre-rename cpex.* keys), never from the
+stream id.
 
 Usage:
   python cpex_to_ledger.py --file /var/log/cpex-audit.jsonl
@@ -41,7 +53,8 @@ from ledger_client import LedgerClient
 SOURCE_ID = "cpex-audit-seam"
 CONTENT_TYPE = "application/ocsf+json"
 
-STREAM_PREFIX_MAP = {
+# Compatibility for records emitted before the AID-EMIT-1 nested shape.
+LEGACY_STREAM_PREFIX_MAP = {
     "dec-": "decision",
     "eff-": "effect",
 }
@@ -59,10 +72,12 @@ RECORD_TYPE_KEYS = (
     ("cpex.effect", "effect"),
 )
 
-# The per-request join key a signed draw receipt reconciles against.
-REQUEST_ID_KEY = "cmf.request.request_id"
+UNMAPPED_ENVELOPE_KEYS = ("signature_b64", "signature_key_id")
 
-ENVELOPE_KEYS = ("signature_b64", "signature_key_id", "fingerprint", "prev_fingerprint")
+# The first stream_seq a host emits in an epoch. AID-EMIT-1 section 7 defines
+# stream_seq as dense within (epoch, stream_id), and the reference host (CPEX)
+# stamps from a zero-initialised counter, so every epoch opens at 0.
+STREAM_HEAD_SEQ = 0
 
 
 # Current key first, then the pre-rename key.
@@ -94,14 +109,36 @@ def extract_stream_stamps(event):
 
 
 class GapDetector:
-    """Tracks stream_seq continuity per (epoch, stream_id) and emission_seq
-    monotonicity."""
+    """Tracks stream_seq continuity per (epoch, stream_id), the head of each
+    epoch, epoch ordering per stream_id, and emission_seq monotonicity.
+
+    Density is a per-(epoch, stream_id) property: a producer restart opens a
+    new epoch and legitimately resets the counter, so a new epoch is never a
+    gap; it is reported as a note (pop_notes) instead. Two things ARE alerted that a tail-only check cannot see:
+
+    * The head of every epoch. An epoch opens at stream_seq 0, so a first
+      record above 0 means records 0..n-1 never arrived. The record emitted
+      while the process is still coming up is the one most likely to be
+      dropped, and it is exactly the one that leaves no tail to check
+      against — so a restart that lost record 0 used to read as a clean,
+      dense epoch. Applied to epoch-stamped records only: the legacy
+      top-level shape predates section 7 and carries no epoch, so it has no
+      defined head.
+
+    * Epoch regression. Epochs are boot-ordered per stream, and since CPEX
+      lets the host supply the epoch (plugin_settings.audit_epoch, a
+      programmatic override that CPEX only warns about when it fails to
+      advance) an older epoch arriving after a newer one is either a late
+      replay of a dead process or a host that pinned its epoch — in both
+      cases the completeness claim for that stream no longer holds, and it
+      used to pass silently.
+    """
 
     def __init__(self):
         self._last_seq = {}
+        self._newest_epoch = {}
+        self._last_emission_seq = {}
         self._last_epoch = {}
-        self._last_emission_seq = -1
-        self._last_emission_epoch = None
         self._notes = []
 
     def pop_notes(self):
@@ -111,6 +148,7 @@ class GapDetector:
 
     def check(self, stream_id, stream_seq, emission_seq, epoch=None):
         alerts = []
+        stream_key = (epoch, stream_id)
 
         previous_epoch = self._last_epoch.get(stream_id, epoch)
         if previous_epoch != epoch:
@@ -120,33 +158,42 @@ class GapDetector:
             )
         self._last_epoch[stream_id] = epoch
 
-        key = (epoch, stream_id)
-        if key in self._last_seq:
-            expected = self._last_seq[key] + 1
+
+        if stream_key in self._last_seq:
+            expected = self._last_seq[stream_key] + 1
             if stream_seq != expected:
                 alerts.append(
                     f"GAP in {stream_id}: expected stream_seq {expected}, got {stream_seq}"
                 )
+        elif epoch is not None and stream_seq != STREAM_HEAD_SEQ:
+            # First record seen for this (epoch, stream_id): it must be the
+            # head. Reported once, here; the records that follow are then
+            # checked against this (anomalous) tail, not re-flagged.
+            alerts.append(
+                f"GAP at head of {stream_id} epoch {epoch}: expected stream_seq "
+                f"{STREAM_HEAD_SEQ}, got {stream_seq} "
+                f"(records {STREAM_HEAD_SEQ}..{stream_seq - 1} not seen)"
+            )
 
-        self._last_seq[key] = stream_seq
+        self._last_seq[stream_key] = stream_seq
 
-        # emission_seq is per executor: a restart resets it with the new,
-        # larger epoch, so the ordering claim is (epoch, emission_seq). A
-        # record that names no epoch is compared on emission_seq alone.
-        if emission_seq is not None:
-            if epoch is not None and self._last_emission_epoch is not None:
-                order = (epoch, emission_seq)
-                previous = (self._last_emission_epoch, self._last_emission_seq)
-            else:
-                order, previous = emission_seq, self._last_emission_seq
-            if order <= previous:
+        if isinstance(epoch, int):
+            newest = self._newest_epoch.get(stream_id)
+            if isinstance(newest, int) and epoch < newest:
                 alerts.append(
-                    f"ORDERING: emission_seq {emission_seq} <= previous "
-                    f"{self._last_emission_seq}"
-                    + (f" (epoch {epoch})" if epoch is not None else "")
+                    f"EPOCH REGRESSION in {stream_id}: epoch {epoch} after {newest}"
                 )
-            self._last_emission_seq = emission_seq
-            self._last_emission_epoch = epoch
+            elif newest is None or epoch > newest:
+                self._newest_epoch[stream_id] = epoch
+
+        previous_emission_seq = self._last_emission_seq.get(epoch, -1)
+        if emission_seq is not None and emission_seq <= previous_emission_seq:
+            alerts.append(
+                f"ORDERING: emission_seq {emission_seq} <= previous {previous_emission_seq}"
+            )
+        if emission_seq is not None:
+            self._last_emission_seq[epoch] = emission_seq
+
 
         return alerts
 
@@ -167,10 +214,11 @@ def detect_record_type(event):
                 return record_type
 
     stream_id = event.get("stream_id", "")
-    for prefix, record_type in STREAM_PREFIX_MAP.items():
+    for prefix, record_type in LEGACY_STREAM_PREFIX_MAP.items():
         if stream_id.startswith(prefix):
             return record_type
     return None
+
 
 
 def extract_agent_id(event):
@@ -182,20 +230,6 @@ def extract_agent_id(event):
 
 
 def extract_correlation_id(event):
-    """Prefer the per-request join key, falling back to the conversation key.
-
-    A signed draw receipt names the request's correlation id, and the plugin
-    carries that at unmapped["cmf.request.request_id"] — deliberately not in
-    metadata.correlation_uid, which it reserves for an id that is stable
-    across events. The ledger's correlation_id is the field a receipt-in-hand
-    is queried against, so the per-request id wins where a record has one.
-    """
-    unmapped = event.get("unmapped")
-    if isinstance(unmapped, dict):
-        request_id = unmapped.get(REQUEST_ID_KEY)
-        if request_id:
-            return request_id
-
     metadata = event.get("metadata", {})
     return metadata.get("correlation_uid", "")
 
@@ -223,11 +257,26 @@ def extract_signer_key_reference(event):
 
 
 def canonicalize_content(event):
-    """Strip envelope fields from unmapped, JCS-canonicalize, return (bytes, sha256_hex)."""
+    """Return the AID-EMIT-1 covered bytes and their SHA-256 fingerprint.
+
+    AID-EMIT-1 section 4 excludes the derived fingerprint and signature
+    descriptors from the first attestation entry, plus the transitional raw
+    signature fields under ``unmapped``. Chain identity and position fields,
+    including ``prev_event``, remain covered.
+    """
     content = copy.deepcopy(event)
 
+    attestations = content.get("attestation_list")
+    if (
+        isinstance(attestations, list)
+        and attestations
+        and isinstance(attestations[0], dict)
+    ):
+        attestations[0].pop("fingerprint", None)
+        attestations[0].pop("signatures", None)
+
     unmapped = content.get("unmapped", {})
-    for key in ENVELOPE_KEYS:
+    for key in UNMAPPED_ENVELOPE_KEYS:
         unmapped.pop(key, None)
     if not unmapped:
         content.pop("unmapped", None)

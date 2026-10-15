@@ -99,6 +99,13 @@ def get_client():
     return _client
 
 
+def normalize_content(content):
+    """Encode structured JSON content for the byte-oriented ledger contract."""
+    if isinstance(content, (dict, list)):
+        return json.dumps(content, separators=(",", ":"), sort_keys=True)
+    return content
+
+
 def _query_capped(max_entries=10000, **kwargs):
     """Paginated query that stops after max_entries. Returns (entries, truncated)."""
     c = get_client()
@@ -150,7 +157,7 @@ def write_entry():
     resp = c.write(
         entry_type=body.get("entry_type", ""),
         agent_id=body.get("agent_id", ""),
-        content=body.get("content", ""),
+        content=normalize_content(body.get("content", "")),
         content_type=body.get("content_type", "application/json"),
         source_id=body.get("source_id", ""),
         correlation_id=body.get("correlation_id", ""),
@@ -176,7 +183,7 @@ def issue_receipt():
     receipt = c.issue_receipt(
         entry_type=body.get("entry_type", ""),
         agent_id=body.get("agent_id", ""),
-        content=body.get("content", ""),
+        content=normalize_content(body.get("content", "")),
         content_type=body.get("content_type", "application/json"),
         source_id=body.get("source_id", ""),
         correlation_id=body.get("correlation_id", ""),

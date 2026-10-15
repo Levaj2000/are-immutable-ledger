@@ -50,6 +50,21 @@ class _FakeClient:
         self.closed = True
 
 
+class _FakeWriteClient:
+    def __init__(self):
+        self.write_kwargs = None
+
+    def write(self, **kwargs):
+        self.write_kwargs = kwargs
+        return SimpleNamespace(
+            entry_id="entry-1",
+            entry_hash="a" * 64,
+            chain_position=1,
+            written_ts=150,
+            hash_version="ARE_LEDGER_ENTRY_HASH_V3",
+        )
+
+
 def test_entries_query_forwards_unix_millisecond_window_and_input_hash(monkeypatch):
     ledger = _FakeClient()
     monkeypatch.setattr(gateway, "get_client", lambda: ledger)
@@ -83,3 +98,20 @@ def test_entries_query_rejects_non_integer_time_window(monkeypatch):
     assert response.status_code == 400
     assert ledger.query_kwargs is None
     assert ledger.closed is False  # singleton client is reused, not closed per-request
+
+
+def test_write_serializes_structured_json_content(monkeypatch):
+    ledger = _FakeWriteClient()
+    monkeypatch.setattr(gateway, "get_client", lambda: ledger)
+
+    response = gateway.app.test_client().post(
+        "/api/entries",
+        json={
+            "entry_type": "release.validation.v1",
+            "agent_id": "certifier",
+            "content": {"check": "contract", "passed": True},
+        },
+    )
+
+    assert response.status_code == 201
+    assert ledger.write_kwargs["content"] == '{"check":"contract","passed":true}'

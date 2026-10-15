@@ -26,17 +26,12 @@ python cpex_to_ledger.py --write-only --file audit.jsonl
 |---|---|---|
 | `unmapped."aid.decision"` present | `entry_type` | `cpex.decision`; `unmapped."aid.effect"` reserved for `on_effect`. The pre-rename `cpex.decision` / `cpex.effect` keys are also accepted. Falls back to a `dec-*`/`eff-*` prefixed top-level `stream_id` for older seam output |
 | `ai_agent.uid` | `agent_id` | NOT `metadata.uid` (record ID) |
-| `unmapped."cmf.request.request_id"` | `correlation_id` | The join key a signed draw receipt reconciles against. Falls back to `metadata.correlation_uid` (conversation-scoped) when a record carries no request id |
+| `metadata.correlation_uid` | `correlation_id` | Conversation/run correlation; deliberately not the per-request identifier |
 | `metadata.uid` | `idempotency_key` | Record ID — unique per event |
 | JCS-canonicalized event | `content` | Envelope fields stripped |
 | SHA-256 of canonical content | `input_hash` | |
 | `unmapped.signature_b64` | `writer_signature` | Base64-decoded |
 | `unmapped.signature_key_id` | `signer_key_reference` | |
-
-The plugin sets `metadata.correlation_uid` only for correlations that are stable across
-events, so most decision records carry none; the per-request id is what a receipt names.
-Mapping the request id into `correlation_id` is what lets `receipt.correlation_id` be
-queried directly against the ledger.
 
 ## Gap Detection
 
@@ -48,8 +43,18 @@ before the rename, and top-level fields for older seam output.
 
 The adapter validates two counters from the CPEX audit seam:
 
-- **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within an epoch of its stream; a gap means a missing record. The adapter alerts on gaps. A CPEX restart opens a new epoch and legitimately resets the counter — that discontinuity is expected and is not a gap.
-- **`emission_seq`** (per epoch, across decisions and effects) — ordering claim only. Legitimately sparse for single-stream consumers. A restart resets it along with the epoch, so the adapter checks `(epoch, emission_seq)` for monotonicity and alerts on ordering violations, not on gaps.
+- **`stream_seq`** (per `(epoch, stream_id)`) — completeness claim. Dense within its stream and process lifetime, **opening at 0** (CPEX stamps from a zero-initialised counter); a gap means a missing record. The adapter alerts on interior gaps and on the head of every epoch — a first record above 0 means records `0..n-1` never arrived, which a tail-only check cannot see. A new epoch on the same stream is a producer restart: a boundary, never a gap.
+- **`epoch`** (per `stream_id`) — boot-ordered. An older epoch arriving after a newer one on the same stream (a late replay of a dead process, or a host-supplied `plugin_settings.audit_epoch` that failed to advance — CPEX only warns) is alerted as an epoch regression.
+- **`emission_seq`** (global within an epoch) — ordering claim only. Legitimately sparse for single-stream consumers. The adapter alerts on non-monotonic values (ordering violations) but not on gaps.
+
+`stream_id` is opaque. A CPEX host that sets `plugin_settings.audit_stream_namespace` stamps it as `<namespace>:<kind>` (`gw-1:decision`, `gw-1:effect`); the namespace may itself contain `:`, so recover the kind with `rsplit(":", 1)` if you ever need it. The adapter never does — `entry_type` comes from the record's own content, and the Rev 3 joint-demo bundle (`tests/fixtures/aid_emit_1_rev3_bundle.jsonl`) is one such stream across two epochs.
+
+Current AID-EMIT-1 records carry all four stamps under `unmapped."aid.stream"` (`unmapped."cpex.stream"` before the key rename). Top-level stamps remain accepted only for replaying the adapter's legacy input shape.
+
+The signed per-request join key remains at
+`unmapped."cmf.request.request_id"` inside `content`. It is not overloaded into
+the conversation-scoped `correlation_id`; a separately indexed ledger request
+field requires its own API and storage contract.
 
 Gap detection is **alert-and-continue** — records are still written to the ledger. Use `--strict-gaps` to exit with code 1 if any gaps are detected (CI quality gate).
 
@@ -59,7 +64,7 @@ The reset is reported on stderr as
 
 ## Content Canonicalization
 
-Envelope fields (`unmapped.signature_b64`, `unmapped.signature_key_id`, `unmapped.fingerprint`, `unmapped.prev_fingerprint`) are stripped before canonicalization. The remaining event is JCS-canonicalized (RFC 8785) and SHA-256 hashed. This ensures both the CPEX fingerprint chain and the ledger's V3 entry hash commit to the same canonical bytes.
+Covered bytes follow [AID-EMIT-1 section 4](https://github.com/Levaj2000/AI-Identity/blob/main/docs/specs/aid-emit-1.md): `attestation_list[0].fingerprint`, `attestation_list[0].signatures`, `unmapped.signature_b64`, and `unmapped.signature_key_id` are stripped before JCS canonicalization (RFC 8785). An empty `unmapped` object is removed. Attestation identity, authority, chain identity, and `prev_event` remain covered. The resulting SHA-256 `input_hash` therefore reproduces the emitter fingerprint; the ledger's V3 entry hash then durably binds those canonical content bytes with ledger metadata and chain position.
 
 ## Production Path
 
