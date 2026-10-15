@@ -97,6 +97,7 @@ READ_POLICY = 6.0        # let viewers read the spotlighted policy
 READ_RESPONSE = 6.0      # let viewers read the agent's answer and the records
 AFTER_SEND_MIN = 2.0     # settle before watching for the prompt
 RESPONSE_TIMEOUT = 100   # LLM completion + gateway round-trip
+BANNER_TIMEOUT = 90      # litellm import + Keycloak token mint before chat.py's banner
 PROOF_TIMEOUT = 60       # adapter + ledger verification at the close
 
 # --------------------------------------------------------------------------
@@ -503,10 +504,14 @@ def record(no_cleanup: bool = False) -> int:
     # any absolute home path) is captured. The two top panes get a blank
     # prompt with no input echo, so only their output shows. The chat pane
     # keeps echo on with a short prompt so the typed prompts stay visible.
+    # The pane shells are fresh login shells, and macOS's path_helper (or a
+    # .zshrc) can reorder PATH so the venv no longer comes first; put this
+    # interpreter's bin directory back in front so `python` is the venv's.
+    venv_bin = Path(sys.executable).resolve().parent
     send_line(policy, "stty -echo; PS1=''; clear")
     send_line(records, "stty -echo; PS1=''; clear")
-    send_line(chat, f"cd {AGENT_DIR}; PS1='$ '; clear")
-    time.sleep(0.8)
+    send_line(chat, f"cd {AGENT_DIR}; export PATH=\"{venv_bin}:$PATH\"; PS1='$ '; clear")
+    time.sleep(1.5)
     py = _python_for_pane()
     mark = _records_mark()
 
@@ -523,8 +528,11 @@ def record(no_cleanup: bool = False) -> int:
         send_line(records, f"clear; {sys.executable} {SELF} records")
         send_line(policy, f"clear; {sys.executable} {SELF} spotlight allow")
         send_line(chat, f"DEMO_MODEL={DEMO_MODEL} {py} chat.py --persona bob")
-        if not wait_for_text(chat, BANNER_MARKER, timeout=40):
-            print("chat.py banner never appeared; see the pane (--no-cleanup) or its logs.")
+        if not wait_for_text(chat, BANNER_MARKER, timeout=BANNER_TIMEOUT):
+            print(f"chat.py banner never appeared within {BANNER_TIMEOUT}s. The chat pane shows:")
+            print("-" * 72)
+            print("\n".join(l for l in capture(chat).splitlines() if l.strip()) or "(nothing)")
+            print("-" * 72)
             return 1
         wait_for_prompt(chat, "bob", timeout=40)
         time.sleep(2.0)
