@@ -507,7 +507,10 @@ def record(no_cleanup: bool = False) -> int:
     # The pane shells are fresh login shells, and macOS's path_helper (or a
     # .zshrc) can reorder PATH so the venv no longer comes first; put this
     # interpreter's bin directory back in front so `python` is the venv's.
-    venv_bin = Path(sys.executable).resolve().parent
+    # sys.prefix is the venv itself (not resolved: the venv's python is a
+    # symlink to the base interpreter, whose bin has none of the deps).
+    venv_bin = Path(sys.prefix) / "bin" if (Path(sys.prefix) / "bin").is_dir() \
+        else Path(sys.executable).parent
     send_line(policy, "stty -echo; PS1=''; clear")
     send_line(records, "stty -echo; PS1=''; clear")
     send_line(chat, f"cd {AGENT_DIR}; export PATH=\"{venv_bin}:$PATH\"; PS1='$ '; clear")
