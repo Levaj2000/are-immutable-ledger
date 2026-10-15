@@ -28,8 +28,11 @@ PY="$(command -v python)"
     { echo "  ✗ python ($PY) lacks the chat deps; activate the chat venv first"; exit 1; }
 
 # tmux shrinks the window to this terminal when it attaches, so the cast is
-# only the 160x48 layout if the terminal is at least that big.
-cols="$(tput cols 2>/dev/null || echo 0)"; lines="$(tput lines 2>/dev/null || echo 0)"
+# only the 160x48 layout if the terminal is at least that big. Ask the tty
+# itself: macOS tput answers 80x24 inside a command substitution because its
+# stdout is a pipe, whatever the window size.
+size="$(stty size </dev/tty 2>/dev/null || echo "0 0")"
+lines="${size%% *}"; cols="${size##* }"
 if [ "$cols" -lt "$COLS" ] || [ "$lines" -lt "$ROWS" ]; then
     echo "  ✗ this terminal is ${cols}x${lines}; the layout needs ${COLS}x${ROWS}. Make the window bigger (full screen) and rerun."
     exit 1
