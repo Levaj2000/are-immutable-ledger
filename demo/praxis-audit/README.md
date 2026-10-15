@@ -24,6 +24,19 @@ HR MCP server (:9100)                     ▼
 Same realm, users and tools as joint-cpex, same story. What changed is that
 every receipt now comes from a record the gateway itself wrote and signed.
 
+## Watch it run
+
+An LLM-driven session in front of the gateway, driven through
+[agent/chat.py](agent/chat.py) with the records pane beside it: Bob's allowed
+lookup with its four signed records, Alice denied before the HR system sees
+the request, Bob's outbound email refused by session taint, and Eve's SSN
+redacted in flight. Each ruling lands in the records pane as a signed, chained
+OCSF record the moment it is made, with the denials in red.
+
+<!-- Recorded with tools/record-live.sh (see agent/demo/README.md); to replace
+     it, record again and `asciinema upload agent/demo/chat-live.cast`. -->
+[![Praxis audit demo recording](https://asciinema.org/a/CIdfHzlDLCswA0SN.svg)](https://asciinema.org/a/CIdfHzlDLCswA0SN)
+
 ## Run it
 
 ```bash
@@ -78,6 +91,7 @@ rule fires first; the domain rule catches the same email from a clean session.
 | `keycloak/` | joint-cpex's `cpex-demo` realm (bob, alice, eve, charlie) |
 | `agent/agent.py` | The scripted agent for scenario 03 |
 | `agent/chat.py` | The live LLM agent for presenting (vendored from praxis-proxy/demos), with [CHAT.md](agent/CHAT.md) |
+| `agent/demo/` | The tmux + asciinema recorder for the chat demo, with [its README](agent/demo/README.md) |
 | `scenarios/` | 01-06 and their shared helpers |
 | `tools/` | Gateway start/stop, ledger receipt lookup, pinned validator fetch, live record watcher |
 

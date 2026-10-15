@@ -1,3 +1,6 @@
 out/
 keys/
 gateway/target/
+agent/demo/*.cast
+agent/demo/*.gif
+agent/demo/*.mp4
