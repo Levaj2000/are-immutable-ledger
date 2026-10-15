@@ -24,6 +24,30 @@ HR MCP server (:9100)                     ▼
 Same realm, users and tools as joint-cpex, same story. What changed is that
 every receipt now comes from a record the gateway itself wrote and signed.
 
+## Who built what
+
+This demo is a joint effort across three projects, and the credit splits
+the same way:
+
+- **The ARE immutable ledger and its proof layer** (this repository:
+  hash-chained storage, proof receipts, the proof explorer, the demo
+  compose stack) were started and are maintained by Jonathan Kershaw.
+  The canonical repository is
+  [jkershawrh/are-immutable-ledger](https://github.com/jkershawrh/are-immutable-ledger);
+  the demo pins a commit of it, and any fork is a working copy.
+- **The Praxis policy engine, its executor audit seam and the enforcement
+  shown here** (identity, APL policy, CEL, session taint, token exchange,
+  redaction) are the Praxis team's work at IBM, in particular Frederico
+  Araujo and Teryl Taylor
+  ([praxis-proxy/policy](https://github.com/praxis-proxy/policy)).
+- **The `ocsf-audit` sink, the AID-EMIT-1 alignment of the CPEX adapter,
+  and this demo** (gateway host, scenarios, chat walkthrough, recorder)
+  were built by Jeff Leva, with Kersh, Fred and Teryl reviewing.
+
+The integration discussions that led here were started by Jonathan Kershaw
+with the Praxis team; this directory is their outcome, not a separate
+project.
+
 ## Run it
 
 ```bash
