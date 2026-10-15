@@ -41,6 +41,9 @@ fi
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$DEMO_DIR"
 tmux set-option -t "$SESSION" status off   # keep the status bar out of the cast
+# A wheel scroll over the records pane would put it in copy mode (the pane
+# shows "[0/0]" top right) and freeze its output for the rest of the take.
+tmux set-option -t "$SESSION" mouse off
 # tmux scrolls a side-by-side pane with DECSLRM left-right margins when the
 # terminal advertises them (Ghostty does). The asciinema web player does not
 # implement DECSLRM, so each chat-pane scroll would drag the records pane off
