@@ -34,9 +34,9 @@ ledger receipt for the refused email verified on screen. The governing policy
 is shown beside each step, and the records pane shows each ruling become a
 signed record as it happens.
 
-<!-- Recorded with agent/demo/record_chat_demo.py (see agent/demo/README.md);
-     replace the link after `asciinema upload agent/demo/chat-demo.cast`. -->
-[![Praxis audit demo recording](https://asciinema.org/a/REPLACE_WITH_UPLOAD_ID.svg)](https://asciinema.org/a/REPLACE_WITH_UPLOAD_ID)
+<!-- Recorded with tools/record-live.sh (see agent/demo/README.md); to replace
+     it, record again and `asciinema upload agent/demo/chat-live.cast`. -->
+[![Praxis audit demo recording](https://asciinema.org/a/33FbaxMcjbGJKnHU.svg)](https://asciinema.org/a/33FbaxMcjbGJKnHU)
 
 ## Run it
 
