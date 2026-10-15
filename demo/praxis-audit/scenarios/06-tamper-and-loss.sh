@@ -27,16 +27,20 @@ line=$(grep -n '"action":"Denied"' "$WORK/original.ndjson" | head -1 | cut -d: -
 [ -n "$line" ] || fail "no deny record to tamper with; run scenarios 02-03 first"
 sed "${line}s/\"action\":\"Denied\"/\"action\":\"Allowed\"/" "$WORK/original.ndjson" > "$WORK/tampered.ndjson"
 info "edited record $line"
-python3 -I "$VALIDATOR" "$WORK/tampered.ndjson" --key "$KEY" | grep -E '^ERROR|^FAIL' | head -4 | sed 's/^/    /' || true
+tamper_out=$(python3 -I "$VALIDATOR" "$WORK/tampered.ndjson" --key "$KEY" | grep -E '^ERROR|^FAIL' | head -4 || true)
+[ -n "$tamper_out" ] || fail "validator did not flag the tampered record (expected ERROR/FAIL)"
+echo "$tamper_out" | sed 's/^/    /'
 
 step "3. Delete one record"
 # A record in the middle of the first chain.
 del=$(( $(records | jq -s 'map(select(.attestation_list[0].chain_uid == $c)) | length' --arg c "$(records | head -1 | jq -r '.attestation_list[0].chain_uid')") / 2 + 1 ))
 sed "${del}d" "$WORK/original.ndjson" > "$WORK/missing.ndjson"
 info "deleted record $del"
-python3 -I "$VALIDATOR" "$WORK/missing.ndjson" --key "$KEY" | grep -E '^(ERROR|WARN)' | head -3 | sed 's/^/    /' || true
+gap_out=$(python3 -I "$VALIDATOR" "$WORK/missing.ndjson" --key "$KEY" | grep -E '^(ERROR|WARN)' | head -3 || true)
+[ -n "$gap_out" ] || fail "validator did not flag the deleted record (expected ERROR/WARN)"
+echo "$gap_out" | sed 's/^/    /'
 info "and the ledger adapter's gap detector, over the same export (nothing written):"
-python3 - "$REPO_DIR/adapters/cpex" "$WORK/missing.ndjson" <<'PY' | sed 's/^/    /'
+detect_out=$(python3 - "$REPO_DIR/adapters/cpex" "$WORK/missing.ndjson" <<'PY'
 import json, sys
 sys.path.insert(0, sys.argv[1])
 from cpex_to_ledger import GapDetector, extract_stream_stamps
@@ -46,6 +50,9 @@ for line in open(sys.argv[2]):
     for alert in detector.check(stream_id, seq, emission, epoch=epoch):
         print("WARNING:", alert)
 PY
+)
+[ -n "$detect_out" ] || fail "gap detector did not flag the deleted record (expected WARNING)"
+echo "$detect_out" | sed 's/^/    /'
 
 auditor "a pinpointed failure for the edited record (fingerprint and signature no longer
          verify, and the next record's link breaks) and a stream_seq gap for the deleted one,

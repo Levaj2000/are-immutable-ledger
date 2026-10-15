@@ -256,6 +256,32 @@ def extract_signer_key_reference(event):
     return unmapped.get("signature_key_id", "")
 
 
+def _reject_non_jcs_scalars(value, path="$"):
+    """Reject values RFC 8785 (JCS) cannot represent.
+
+    JCS covers objects, arrays, strings, integers, booleans and null only.
+    Python floats (including NaN/Infinity and integral floats like 1.0) have
+    no canonical JCS encoding, and ``json.dumps`` would silently emit them
+    (``1.0``, ``NaN``), so refuse them instead of hashing an ambiguous
+    encoding. This value becomes the ledger ``input_hash``.
+    """
+    if isinstance(value, bool) or value is None:
+        return
+    if isinstance(value, float):
+        raise ValueError(f"non-JCS float at {path}: {value!r}")
+    if isinstance(value, (int, str)):
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            _reject_non_jcs_scalars(v, f"{path}.{k}")
+        return
+    if isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            _reject_non_jcs_scalars(v, f"{path}[{i}]")
+        return
+    raise ValueError(f"non-JCS value at {path}: {type(value).__name__}")
+
+
 def canonicalize_content(event):
     """Return the AID-EMIT-1 covered bytes and their SHA-256 fingerprint.
 
@@ -264,6 +290,7 @@ def canonicalize_content(event):
     signature fields under ``unmapped``. Chain identity and position fields,
     including ``prev_event``, remain covered.
     """
+    _reject_non_jcs_scalars(event)
     content = copy.deepcopy(event)
 
     attestations = content.get("attestation_list")
@@ -285,6 +312,8 @@ def canonicalize_content(event):
 
     # Sorted keys, no whitespace, raw UTF-8: matches RFC 8785 (JCS) for the
     # OCSF payloads the sink emits (strings, integers, nested objects).
+    # Non-JCS scalars (floats, NaN/Infinity) are rejected above, since this
+    # value becomes the ledger input_hash.
     canonical = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     if isinstance(canonical, str):

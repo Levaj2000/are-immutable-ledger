@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ledger
       POSTGRES_DB: ledger
     ports:
-      - "54330:5432"
+      - "127.0.0.1:54330:5432"
     volumes:
       - ../../migrations/001_init.sql:/docker-entrypoint-initdb.d/01-init.sql
       - ../../migrations/002_correlation_id_text.sql:/docker-entrypoint-initdb.d/02-correlation-id.sql
@@ -41,9 +41,9 @@ services:
       ARE_LEDGER_HEALTH_PORT: "8080"
       ARE_LEDGER_METRICS_PORT: "8083"
     ports:
-      - "19292:19092"
-      - "18080:8080"
-      - "18083:8083"
+      - "127.0.0.1:19292:19092"
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:18083:8083"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/readyz || exit 1"]
       interval: 3s
@@ -58,7 +58,7 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     ports:
-      - "8081:8081"
+      - "127.0.0.1:8081:8081"
     volumes:
       - ./keycloak:/opt/keycloak/data/import
     healthcheck:
@@ -72,7 +72,7 @@ services:
     build:
       context: ./hr-mcp-server
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9100/healthz || exit 1"]
       interval: 3s
@@ -82,7 +82,7 @@ services:
   valkey:
     image: valkey/valkey:8-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 2s

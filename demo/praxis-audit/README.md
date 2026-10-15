@@ -42,7 +42,10 @@ the same way:
   ([praxis-proxy/policy](https://github.com/praxis-proxy/policy)).
 - **The `ocsf-audit` sink, the AID-EMIT-1 alignment of the CPEX adapter,
   and this demo** (gateway host, scenarios, chat walkthrough, recorder)
-  were built by Jeff Leva, with Kersh, Fred and Teryl reviewing.
+  were built by Jeff Leva. The adapter alignment was joint work: Jeff's
+  aid.* compatibility and integration, together with the upstream
+  covered-bytes, correlation and gap rules. Review from Jonathan Kershaw,
+  Frederico Araujo and Teryl Taylor is invited.
 
 The integration discussions that led here were started by Jonathan Kershaw
 with the Praxis team; this directory is their outcome, not a separate
