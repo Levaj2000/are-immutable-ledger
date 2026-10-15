@@ -54,6 +54,13 @@ The artifacts (`chat-demo.cast`, `.gif`, `.mp4`) are written here and
 gitignored. To publish, `asciinema upload demo/chat-demo.cast` and put the
 link in the README's "Watch it run" section.
 
+## Driving it yourself
+
+`../../tools/record-live.sh` records the same two-pane layout while you type
+the beats: the records pane on the left, `chat.py` on the right, captured with
+asciinema until you detach from tmux (`Ctrl-b`, then `d`). It writes
+`chat-live.cast` here.
+
 ## How it drives the session
 
 The harness types each prompt into the chat pane with `tmux send-keys` and
