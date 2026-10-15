@@ -40,6 +40,7 @@ fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$DEMO_DIR"
+tmux set-option -t "$SESSION" status off   # keep the status bar out of the cast
 tmux split-window -h -t "$SESSION" -l "$CHAT_COLS" -c "$DEMO_DIR/agent"
 left="$(tmux list-panes -t "$SESSION" -F '#{pane_left} #{pane_id}' | sort -n | head -1 | cut -d' ' -f2)"
 right="$(tmux list-panes -t "$SESSION" -F '#{pane_left} #{pane_id}' | sort -n | tail -1 | cut -d' ' -f2)"
